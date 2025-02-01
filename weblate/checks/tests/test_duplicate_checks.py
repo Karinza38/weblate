@@ -106,6 +106,11 @@ class DuplicateCheckTest(CheckTestCase):
         self.assertFalse(self.check.check_single("", "for [em]x[/em]", MockUnit()))
         self.assertTrue(self.check.check_single("", "em [em]x[/em]", MockUnit()))
         self.assertTrue(self.check.check_single("", "em [em]x", MockUnit()))
+        self.assertFalse(
+            self.check.check_single(
+                "", "em [em]x[/em]", MockUnit(flags=["bbcode-text"])
+            )
+        )
 
     def test_duplicated_punctuation(self) -> None:
         self.assertFalse(
@@ -133,4 +138,14 @@ class DuplicateCheckTest(CheckTestCase):
                 MockUnit(code="pt"),
             ),
             {"para"},
+        )
+
+    def test_rst_markup(self) -> None:
+        self.assertEqual(
+            self.check.check_single(
+                "This can be done in :guilabel:`Service hooks` under :guilabel:`Project settings`.",
+                "Esto se puede hacer en :guilabel:`Ganchos de servicio` en :guilabel:` Configuración del proyecto` .",
+                MockUnit(code="es", flags="rst-text"),
+            ),
+            {},
         )

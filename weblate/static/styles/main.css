@@ -289,12 +289,15 @@ textarea#id_check_flags {
 }
 
 .hlspace,
+.nbsp,
 .token.newline {
   outline: 1px dotted red;
   color: #bfc3c7;
   white-space: pre-wrap;
 }
-
+.nbsp {
+  white-space: nowrap !important;
+}
 .space-tab,
 .space-nl,
 .space-space,
@@ -377,19 +380,19 @@ td .list-group {
 }
 
 th .sort-icon.sort-up {
-  background-image: url("sort/up.svg");
+  background-image: url("../sort/up.svg");
 }
 
 th .sort-icon.sort-down {
-  background-image: url("sort/down.svg");
+  background-image: url("../sort/down.svg");
 }
 
 th:hover .sort-icon {
-  background-image: url("sort/hover-down.svg");
+  background-image: url("../sort/hover-down.svg");
 }
 
 th:hover .sort-icon.sort-up {
-  background-image: url("sort/hover-up.svg");
+  background-image: url("../sort/hover-up.svg");
 }
 
 .asteriskField {
@@ -911,6 +914,46 @@ legend {
   position: absolute;
   left: -1.4em;
 }
+@counter-style lower-belorussian {
+  system: alphabetic;
+  symbols: "а" "б" "в" "г" "д" "е" "ё" "ж" "з" "і" "й" "к" "л" "м" "н" "о" "п"
+    "р" "с" "т" "у" "ў" "ф" "х" "ц" "ч" "ш" "ы" "ь" "э" "ю" "я";
+}
+@counter-style lower-bulgarian {
+  system: alphabetic;
+  symbols: "а" "б" "в" "г" "д" "е" "ж" "з" "и" "й" "к" "л" "м" "н" "о" "п" "р"
+    "с" "т" "у" "ф" "х" "ц" "ч" "ш" "щ" "ъ" "ь" "ю" "я";
+}
+@counter-style lower-macedonian {
+  system: alphabetic;
+  symbols: "а" "б" "в" "г" "д" "ѓ" "е" "ж" "з" "ѕ" "и" "ј" "к" "л" "љ" "м" "н"
+    "њ" "о" "п" "р" "с" "т" "ќ" "у" "ф" "х" "ц" "ч" "џ" "ш";
+}
+@counter-style lower-russian {
+  system: alphabetic;
+  symbols: "а" "б" "в" "г" "д" "е" "ж" "з" "и" "к" "л" "м" "н" "о" "п" "р" "с"
+    "т" "у" "ф" "х" "ц" "ч" "ш" "щ" "э" "ю" "я";
+}
+@counter-style lower-ukrainian {
+  system: alphabetic;
+  symbols: "а" "б" "в" "г" "д" "е" "є" "ж" "з" "и" "і" "к" "л" "м" "н" "о" "п"
+    "р" "с" "т" "у" "ф" "х" "ц" "ч" "ш" "ю" "я";
+}
+[lang="by"] .tos ol > li:before {
+  content: counter(tos_list, lower-belorussian) ") ";
+}
+[lang="bg"] .tos ol > li:before {
+  content: counter(tos_list, lower-bulgarian) ") ";
+}
+[lang="mk"] .tos ol > li:before {
+  content: counter(tos_list, lower-macedonian) ") ";
+}
+[lang="ru"] .tos ol > li:before {
+  content: counter(tos_list, lower-russian) ") ";
+}
+[lang="uk"] .tos ol > li:before {
+  content: counter(tos_list, lower-ukrainian) ") ";
+}
 
 .vertical-badge .badge {
   clear: right;
@@ -1181,9 +1224,17 @@ th.number {
 thead th {
   font-weight: normal;
 }
+.table > thead > tr > th,
+.table > tbody > tr > th,
+.table > tfoot > tr > th,
+.table > thead > tr > td,
+.table > tbody > tr > td,
+.table > tfoot > tr > td {
+  border-top: var(--border);
+}
 
 .table > thead > tr > th {
-  border-bottom: 1px solid #bfc3c7;
+  border-bottom: none;
 }
 
 .table-listing,
@@ -1898,7 +1949,7 @@ a.language:hover {
   padding: 20px 0;
   margin: 0;
   border: 2px solid #e9eaec;
-  border-radius: 15px;
+  border-radius: calc(var(--border-radius) - 2px);
 }
 .metric-number {
   font-size: 40px;
@@ -2240,7 +2291,7 @@ tbody.warning {
 .sticky-bottom {
   position: sticky;
   bottom: 0;
-  background-color: white;
+  background-color: var(--background-color);
   z-index: 1000;
 }
 
@@ -2262,7 +2313,6 @@ tbody.warning {
 }
 
 .panel-default > .panel-heading {
-  background-color: #e9eaec60;
   border: var(--border);
 }
 .panel-danger > .panel-heading {
@@ -2287,4 +2337,8 @@ tbody.warning {
 
 .altcha {
   max-width: none !important;
+}
+
+.panel-title .pull-right.text-muted {
+  padding: 0 0.5em;
 }

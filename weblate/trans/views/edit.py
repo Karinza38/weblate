@@ -127,8 +127,21 @@ def get_other_units(unit):
                 translation__language=translation.language,
             )
             .annotate(matches_current=Count("id", filter=match))
-            .prefetch()
-            .select_related("source_unit")
+            .select_related(
+                "source_unit",
+                "translation",
+                "translation__language",
+                "translation__plural",
+                "translation__component",
+                "translation__component__category",
+                "translation__component__category__project",
+                "translation__component__category__category",
+                "translation__component__category__category__project",
+                "translation__component__category__category__category",
+                "translation__component__category__category__category__project",
+                "translation__component__project",
+                "translation__component__source_language",
+            )
             .order_by("-matches_current")
         )
 
@@ -229,7 +242,7 @@ def search(
     if form_valid:
         cleaned_data = form.cleaned_data
         search_url = form.urlencode()
-        search_query = form.get_search_query()
+        search_query = form.cleaned_data["q"]
         name = form.get_name()
         search_items = form.items()
     else:
@@ -300,7 +313,7 @@ def perform_suggestion(unit, form, request: AuthenticatedHttpRequest):
         return False
     # Spam check for unauthenticated users
     if not request.user.is_authenticated and is_spam(
-        "\n".join(form.cleaned_data["target"]), request
+        request, form.cleaned_data["target"]
     ):
         messages.error(request, gettext("Your suggestion has been identified as spam!"))
         return False
@@ -569,6 +582,7 @@ def handle_suggestions(
             request.user,
             is_spam="spam" in request.POST,
             rejection_reason=request.POST.get("rejection", ""),
+            old=unit.target,
         )
     elif "upvote" in request.POST:
         suggestion.add_vote(request, Vote.POSITIVE)

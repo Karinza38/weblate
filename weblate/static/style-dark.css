@@ -7,6 +7,7 @@
 :root {
   color-scheme: only dark;
   --border: 1px solid #484d50;
+  --background-color: #1a1d1e;
 }
 
 /* User-Agent Style */
@@ -2146,7 +2147,8 @@ ul.legend li {
 .hlmatch {
   background-color: #8c690c;
 }
-.hlspace {
+.hlspace,
+.nbsp {
   outline-color: #c50000;
   color: #d5d0c7;
 }

@@ -5,7 +5,7 @@ Version control integration
 
 Weblate currently supports :ref:`vcs-git` (with extended support for
 :ref:`vcs-github`, :ref:`vcs-gitlab`, :ref:`vcs-gitea`, :ref:`vcs-gerrit`,
-:ref:`vcs-git-svn`, :ref:`vcs-bitbucket-cloud`, :ref:`vcs-bitbucket-server`, and :ref:`vcs-azure-devops`) and
+:ref:`vcs-git-svn`, :ref:`vcs-bitbucket-cloud`, :ref:`vcs-bitbucket-data-center`, and :ref:`vcs-azure-devops`) and
 :ref:`vcs-mercurial` as version control back-ends.
 
 .. _vcs-repos:
@@ -264,7 +264,7 @@ Git
 
 .. hint::
 
-   Weblate needs Git 2.12 or newer.
+   Weblate needs Git 2.28 or newer.
 
 .. seealso::
 
@@ -318,7 +318,7 @@ For the ``hello`` repository from selenic.com using Mercurial:
 
 .. code-block:: text
 
-    hg::http://selenic.com/repo/hello
+    hg::https://selenic.com/repo/hello
 
 .. _remote helpers: https://git-scm.com/docs/gitremote-helpers
 .. _git-remote-hg: https://github.com/felipec/git-remote-hg
@@ -408,15 +408,16 @@ Weblate settings to make this work. Once configured, you will see a
 .. _Gitea API: https://docs.gitea.io/en-us/api-usage/
 
 .. _vcs-bitbucket-server:
+.. _vcs-bitbucket-data-center:
 .. _bitbucket-server-push:
 
-Bitbucket Server pull requests
-------------------------------
+Bitbucket Data Center pull requests
+-----------------------------------
 
 .. versionadded:: 4.16
 
 This just adds a thin layer atop :ref:`vcs-git` using the
-`Bitbucket Server API`_ to allow pushing translation changes as pull requests
+`Bitbucket Data Center API`_ to allow pushing translation changes as pull requests
 instead of pushing directly to the repository.
 
 .. warning::
@@ -427,18 +428,18 @@ instead of pushing directly to the repository.
 There is no need to use this to access Git repositories, ordinary :ref:`vcs-git`
 works the same, the only difference is how pushing to a repository is
 handled. With :ref:`vcs-git` changes are pushed directly to the repository,
-while :ref:`vcs-bitbucket-server` creates pull request.
+while :ref:`vcs-bitbucket-data-center` creates pull request.
 
 You need to configure API credentials (:setting:`BITBUCKETSERVER_CREDENTIALS`) in the
 Weblate settings to make this work. Once configured, you will see a
-:guilabel:`Bitbucket Server` option when selecting :ref:`component-vcs`.
+:guilabel:`Bitbucket Data Center` option when selecting :ref:`component-vcs`.
 
 .. seealso::
 
    :ref:`push-changes`,
    :setting:`BITBUCKETSERVER_CREDENTIALS`
 
-.. _Bitbucket Server API: https://developer.atlassian.com/server/bitbucket/
+.. _Bitbucket Data Center API: https://developer.atlassian.com/server/bitbucket/
 
 .. _vcs-bitbucket-cloud:
 .. _bitbucket-cloud-push:
@@ -454,7 +455,7 @@ instead of pushing directly to the repository.
 
 .. warning::
 
-    This is different from Bitbucket Server API.
+    This is different from Bitbucket Data Center API.
 
 
 There is no need to use this to access Git repositories, ordinary :ref:`vcs-git`

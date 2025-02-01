@@ -509,6 +509,38 @@ class GlossaryTranslationTest(BaseMachineTranslationTest):
         unit = MockUnit(code="cs", source=":foo", target=":bar")
         self.assertEqual(render_glossary_units_tsv([unit]), ":foo\t:bar")
 
+    def test_glossary_changes_invalidates_result_cache(self):
+        machine = self.get_machine(cache=True)
+        source_text = "Hello, world!"
+        unit = MockUnit(code="cs", source=source_text, target="")
+
+        with (
+            patch.object(
+                DummyGlossaryTranslation,
+                "list_glossaries",
+                return_value={
+                    "weblate:1:en:cs:9e250d830c11d70f": "weblate:1:en:cs:9e250d830c11d70f"
+                },
+            ),
+            patch("weblate.glossary.models.get_glossary_tsv", new=lambda _: "foo\tbar"),
+        ):
+            machine.translate(unit, threshold=75)
+            cache_key, result = machine.get_cached(
+                unit, "en", "cs", source_text, 75, {}
+            )
+            self.assertIsNotNone(cache_key)
+            self.assertTrue(len(result) > 0)
+            self.assertIsNotNone(result)
+
+        with patch(
+            "weblate.glossary.models.get_glossary_tsv", new=lambda _: "foo\tbar-edit"
+        ):
+            new_cache_key, new_result = machine.get_cached(
+                unit, "en", "cs", source_text, 75, {}
+            )
+            self.assertIsNone(new_result)
+            self.assertNotEqual(cache_key, new_cache_key)
+
 
 class GlosbeTranslationTest(BaseMachineTranslationTest):
     MACHINE_CLS = GlosbeTranslation
@@ -533,6 +565,7 @@ class GlosbeTranslationTest(BaseMachineTranslationTest):
             status=429,
         )
 
+    @responses.activate
     def test_ratelimit(self) -> None:
         """Test rate limit response handling."""
         # This raises an exception
@@ -663,8 +696,7 @@ class MicrosoftCognitiveTranslationTest(BaseMachineTranslationTest):
         )
         responses.add(
             responses.GET,
-            "https://api.cognitive.microsofttranslator.com/"
-            "languages?api-version=3.0",
+            "https://api.cognitive.microsofttranslator.com/languages?api-version=3.0",
             json=MS_SUPPORTED_LANG_RESP,
         )
         responses.add(
@@ -686,6 +718,13 @@ class MicrosoftCognitiveTranslationTest(BaseMachineTranslationTest):
             json=MICROSOFT_RESPONSE,
         )
 
+    def test_map_codes(self):
+        machine = self.get_machine()
+        self.assertEqual(machine.map_language_code("zh_Hant"), "zh-Hant")
+        self.assertEqual(machine.map_language_code("zh_TW"), "zh-Hant")
+        self.assertEqual(machine.map_language_code("fr_CA"), "fr-ca")
+        self.assertEqual(machine.map_language_code("iu_Latn"), "iu-Latn")
+
 
 class MicrosoftCognitiveTranslationRegionTest(MicrosoftCognitiveTranslationTest):
     CONFIGURATION = {
@@ -704,8 +743,7 @@ class MicrosoftCognitiveTranslationRegionTest(MicrosoftCognitiveTranslationTest)
         )
         responses.add(
             responses.GET,
-            "https://api.cognitive.microsofttranslator.com/"
-            "languages?api-version=3.0",
+            "https://api.cognitive.microsofttranslator.com/languages?api-version=3.0",
             json=MS_SUPPORTED_LANG_RESP,
         )
         responses.add(
@@ -1825,6 +1863,30 @@ class DeepLTranslationTest(BaseMachineTranslationTest):
         )
         self.assertEqual(len(responses.calls), 0)
 
+    def test_api_url(self) -> None:
+        self.assertEqual(
+            self.MACHINE_CLS(self.CONFIGURATION).api_base_url,
+            "https://api.deepl.com/v2",
+        )
+        self.assertEqual(
+            self.MACHINE_CLS(
+                {
+                    "key": "KEY:fx",
+                    "url": "https://api.deepl.com/v2",
+                }
+            ).api_base_url,
+            "https://api-free.deepl.com/v2",
+        )
+        self.assertEqual(
+            self.MACHINE_CLS(
+                {
+                    "key": "KEY:fx",
+                    "url": "https://example.com/v2",
+                }
+            ).api_base_url,
+            "https://example.com/v2",
+        )
+
 
 class LibreTranslateTranslationTest(BaseMachineTranslationTest):
     MACHINE_CLS = LibreTranslateTranslation
@@ -2496,7 +2558,7 @@ class ViewsTest(FixtureTestCase):
                     "original_source": "Hello, world!\n",
                     "source": "Hello, world!\n",
                     "diff": "<ins>Nazdar světe!</ins>",
-                    "source_diff": 'Hello, world!<span class="hlspace"><span class="space-nl"></span></span><br />',
+                    "source_diff": 'Hello, world!<span class="hlspace"><span class="space-nl">\n</span></span><br>',
                     "html": "Nazdar světe!",
                 },
                 {
@@ -2507,7 +2569,7 @@ class ViewsTest(FixtureTestCase):
                     "source": "Hello, world!\n",
                     "original_source": "Hello, world!\n",
                     "diff": "<ins>Ahoj světe!</ins>",
-                    "source_diff": 'Hello, world!<span class="hlspace"><span class="space-nl"></span></span><br />',
+                    "source_diff": 'Hello, world!<span class="hlspace"><span class="space-nl">\n</span></span><br>',
                     "html": "Ahoj světe!",
                 },
             ],
@@ -2628,7 +2690,7 @@ class CommandTest(FixtureTestCase):
         call_command("list_machinery", stdout=output)
         self.assertIn("DeepL", output.getvalue())
 
-    def test_install_no_form(self) -> None:
+    def test_valid_install_no_form(self) -> None:
         output = StringIO()
         call_command(
             "install_machinery",
@@ -2638,6 +2700,17 @@ class CommandTest(FixtureTestCase):
             stderr=output,
         )
         self.assertIn("Service installed: Weblate", output.getvalue())
+
+    def test_install_unknown_service(self) -> None:
+        output = StringIO()
+        with self.assertRaises(CommandError):
+            call_command(
+                "install_machinery",
+                "--service",
+                "unknown",
+                stdout=output,
+                stderr=output,
+            )
 
     def test_install_missing_form(self) -> None:
         output = StringIO()
@@ -2672,7 +2745,27 @@ class CommandTest(FixtureTestCase):
             "--service",
             "deepl",
             "--configuration",
-            '{"key": "x", "url": "https://api.deepl.com/v2/"}',
+            '{"key": "x1", "url": "https://api.deepl.com/v2/"}',
             stdout=output,
             stderr=output,
+        )
+        self.assertTrue(
+            Setting.objects.filter(category=SettingCategory.MT, name="deepl").exists()
+        )
+
+        # update configuration
+        call_command(
+            "install_machinery",
+            "--service",
+            "deepl",
+            "--configuration",
+            '{"key": "x2", "url": "https://api.deepl.com/v2/"}',
+            "--update",
+            stdout=output,
+            stderr=output,
+        )
+
+        setting = Setting.objects.get(category=SettingCategory.MT, name="deepl")
+        self.assertEqual(
+            setting.value, {"key": "x2", "url": "https://api.deepl.com/v2/"}
         )

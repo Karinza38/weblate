@@ -360,7 +360,6 @@ class DashboardSettingsForm(ProfileBaseForm):
 class UserForm(forms.ModelForm):
     """User information form."""
 
-    username = UniqueUsernameField()
     email = forms.ChoiceField(
         label=gettext_lazy("Account e-mail"),
         help_text=gettext_lazy(
@@ -370,11 +369,14 @@ class UserForm(forms.ModelForm):
         required=True,
         widget=forms.RadioSelect,
     )
-    full_name = FullNameField()
 
     class Meta:
         model = User
         fields = ("username", "full_name", "email")
+        field_classes = {
+            "username": UniqueUsernameField,
+            "full_name": FullNameField,
+        }
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -540,8 +542,9 @@ class CaptchaForm(forms.Form):
 
     def is_valid(self) -> bool:
         result = super().is_valid()
-        self.cleanup_session()
-        if not result and self.has_captcha:
+        if result:
+            self.cleanup_session()
+        elif self.has_captcha:
             self.store_challenge()
         return result
 

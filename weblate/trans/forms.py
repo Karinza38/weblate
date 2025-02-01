@@ -9,7 +9,7 @@ import json
 import re
 from datetime import datetime
 from secrets import token_hex
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, ClassVar, Literal
 
 from crispy_forms.bootstrap import InlineCheckboxes, InlineRadios, Tab, TabHolder
 from crispy_forms.helper import FormHelper
@@ -798,9 +798,6 @@ class SearchForm(forms.Form):
         """Return verbose name for a search."""
         return FILTERS.get_search_name(self.cleaned_data.get("q", ""))
 
-    def get_search_query(self):
-        return self.cleaned_data["q"]
-
     def clean_offset(self):
         if self.cleaned_data.get("offset") is None:
             self.cleaned_data["offset"] = 1
@@ -946,10 +943,14 @@ class AutoForm(forms.Form):
         label=gettext_lazy("Score threshold"), initial=80, min_value=1, max_value=100
     )
 
-    def __init__(self, obj, user=None, *args, **kwargs) -> None:
+    def __init__(
+        self, obj: Component | Project | None, user=None, *args, **kwargs
+    ) -> None:
         """Generate choices for other components in the same project."""
         super().__init__(*args, **kwargs)
-        self.obj, machinery_settings = obj, {}
+        self.obj = obj
+        self.project: Project | None = None
+        machinery_settings = {}
 
         if isinstance(obj, Component):
             self.components = obj.project.component_set.filter(
@@ -959,6 +960,7 @@ class AutoForm(forms.Form):
                 project__contribute_shared_tm=True,
             ).exclude(project=obj.project)
             machinery_settings = obj.project.get_machinery_settings()
+            self.project = obj.project
         elif isinstance(obj, Project):
             self.components = obj.component_set.filter(
                 source_language_id__in=obj.source_language_ids
@@ -967,6 +969,7 @@ class AutoForm(forms.Form):
                 project__contribute_shared_tm=True,
             ).exclude(project=obj)
             machinery_settings = obj.get_machinery_settings()
+            self.project = obj
         else:
             # Site-wide add-ons
             self.components = Component.objects.all()
@@ -1051,8 +1054,10 @@ class AutoForm(forms.Form):
             except Component.DoesNotExist as error:
                 raise ValidationError(gettext("Component not found!")) from error
         elif "/" not in component:
+            if self.project is None:
+                raise ValidationError(gettext("Component not found!"))
             try:
-                result = self.components.get(slug=component, project=self.obj.project)
+                result = self.components.get(slug=component, project=self.project)
             except Component.DoesNotExist as error:
                 raise ValidationError(gettext("Component not found!")) from error
         else:
@@ -1078,8 +1083,7 @@ class CommentForm(forms.Form):
     scope = forms.ChoiceField(
         label=gettext_lazy("Scope"),
         help_text=gettext_lazy(
-            "Is your comment specific to this "
-            "translation, or generic for all of them?"
+            "Is your comment specific to this translation, or generic for all of them?"
         ),
         choices=(
             (
@@ -1430,28 +1434,25 @@ class ProjectDocsMixin(FieldDocsMixin):
 
 
 class SpamCheckMixin(forms.Form):
-    def spam_check(self, value) -> None:
-        if is_spam(value, self.request):
-            raise ValidationError(gettext("This field has been identified as spam!"))
+    spam_fields: ClassVar[tuple[str, ...]]
+
+    def clean(self) -> None:
+        data = self.cleaned_data
+        check_values: list[str] = [
+            data[field] for field in self.spam_fields if field in data
+        ]
+        if is_spam(self.request, check_values):
+            raise ValidationError(
+                gettext("This submission has been identified as spam!")
+            )
 
 
 class ComponentAntispamMixin(SpamCheckMixin):
-    def clean_agreement(self):
-        value = self.cleaned_data["agreement"]
-        self.spam_check(value)
-        return value
+    spam_fields = ("agreement",)
 
 
 class ProjectAntispamMixin(SpamCheckMixin):
-    def clean_web(self):
-        value = self.cleaned_data["web"]
-        self.spam_check(value)
-        return value
-
-    def clean_instructions(self):
-        value = self.cleaned_data["instructions"]
-        self.spam_check(value)
-        return value
+    spam_fields = ("web", "instructions")
 
 
 class ComponentSettingsForm(
@@ -2437,8 +2438,7 @@ class NewMonolingualUnitForm(NewUnitBaseForm):
     source = PluralField(
         label=gettext_lazy("Source language text"),
         help_text=gettext_lazy(
-            "You can edit this later, as with any other string in "
-            "the source language."
+            "You can edit this later, as with any other string in the source language."
         ),
         required=True,
     )
@@ -2671,7 +2671,7 @@ class BulkEditForm(forms.Form):
 
 class ContributorAgreementForm(forms.Form):
     confirm = forms.BooleanField(
-        label=gettext_lazy("I accept the contributor agreement"), required=True
+        label=gettext_lazy("I accept the contributor license agreement"), required=True
     )
     next = forms.CharField(required=False, widget=forms.HiddenInput)
 
@@ -2851,11 +2851,20 @@ class ChangesForm(forms.Form):
 class LabelForm(forms.ModelForm):
     class Meta:
         model = Label
-        fields = ("name", "description", "color")
-        widgets = {"color": ColorWidget()}
+        fields = ("name", "description", "color", "project")
+        widgets = {
+            "color": ColorWidget(),
+            "project": forms.HiddenInput(),
+        }
 
-    def __init__(self, *args, **kwargs) -> None:
+    def clean_project(self):
+        # Ignore any passed value, override by current one
+        return self.project
+
+    def __init__(self, project: Project, *args, **kwargs) -> None:
+        kwargs["initial"] = {"project": project}
         super().__init__(*args, **kwargs)
+        self.project = project
         self.helper = FormHelper(self)
         self.helper.form_tag = False
 

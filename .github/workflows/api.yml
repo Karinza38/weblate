@@ -32,7 +32,7 @@ jobs:
       PYTHONUNBUFFERED: 1
     steps:
     - uses: actions/checkout@v4
-    - uses: astral-sh/setup-uv@v4
+    - uses: astral-sh/setup-uv@v5
       with:
         enable-cache: true
         cache-dependency-glob: ''
@@ -56,7 +56,8 @@ jobs:
     - name: Generate OpenAPI
       run: |
         echo "::add-matcher::.github/matchers/spectacular.json"
-        uv run --no-sources ./manage.py spectacular --urlconf="weblate.api.urls" > weblate-openapi.yaml
+        # TODO: add --fail-on-warn once OpenAPI is without warnings
+        uv run --no-sources ./manage.py spectacular --skip-checks --validate --urlconf="weblate.api.urls" > weblate-openapi.yaml
         echo "::remove-matcher owner=spectacular::"
     - name: openapi-lint
       run: npx @redocly/cli lint --format github-actions weblate-openapi.yaml

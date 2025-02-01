@@ -6,9 +6,12 @@ from __future__ import annotations
 import re
 import uuid
 from collections import defaultdict
+from collections.abc import (
+    Iterable,
+)
 from functools import cache as functools_cache
 from itertools import chain
-from typing import TYPE_CHECKING, TypedDict, cast
+from typing import TYPE_CHECKING, Any, Literal, TypedDict, cast
 
 import sentry_sdk
 from appconf import AppConf
@@ -57,7 +60,10 @@ from weblate.utils.search import parse_query
 from weblate.utils.validators import CRUD_RE, validate_fullname, validate_username
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import (
+        Iterable,
+        Mapping,
+    )
 
     from social_core.backends.base import BaseAuth
     from social_django.models import DjangoStorage
@@ -294,7 +300,12 @@ class UserQuerySet(models.QuerySet["User"]):
     def order(self):
         return self.order_by("username")
 
-    def search(self, query: str, parser: str = "user", **context):
+    def search(
+        self,
+        query: str,
+        parser: Literal["plain", "user", "superuser"] = "user",
+        **context,
+    ):
         """High level wrapper for searching."""
         if parser == "plain":
             result = self.filter(
@@ -328,6 +339,26 @@ class UserQuerySet(models.QuerySet["User"]):
             if author.is_active and not author.is_bot and not author.is_anonymous:
                 return author
         return fallback
+
+    def get_or_create(
+        self,
+        defaults: Mapping[str, Any] | None = None,
+        **kwargs: Any,  # noqa: ANN401
+    ) -> tuple[User, bool]:
+        filtered = {
+            name: value
+            for name, value in defaults.items()
+            if name not in User.DUMMY_FIELDS
+        }
+        extra = {
+            name: value for name, value in defaults.items() if name in User.DUMMY_FIELDS
+        }
+
+        user, created = super().get_or_create(defaults=filtered, **kwargs)
+        if created:
+            user.extra_data = extra
+            user.save()
+        return user, created
 
 
 @functools_cache
@@ -443,8 +474,7 @@ class User(AbstractBaseUser):
         verbose_name=gettext_lazy("Teams"),
         blank=True,
         help_text=gettext_lazy(
-            "The user is granted all permissions included in "
-            "membership of these teams."
+            "The user is granted all permissions included in membership of these teams."
         ),
     )
 
@@ -731,7 +761,7 @@ class User(AbstractBaseUser):
         """Fetch all user permissions into a dictionary."""
         projects: PermissionCacheType = defaultdict(list)
         components: SimplePermissionCacheType = defaultdict(list)
-        with sentry_sdk.start_span(op="permissions", name=self.username):
+        with sentry_sdk.start_span(op="auth.permissions", name=self.username):
             for group in self.cached_groups:
                 # Skip permissions for not verified users
                 if group.enforced_2fa and not self.profile.has_2fa:
@@ -1122,8 +1152,7 @@ class Invitation(models.Model):
         Group,
         verbose_name=gettext_lazy("Team"),
         help_text=gettext_lazy(
-            "The user is granted all permissions included in "
-            "membership of these teams."
+            "The user is granted all permissions included in membership of these teams."
         ),
         on_delete=models.deletion.CASCADE,
     )

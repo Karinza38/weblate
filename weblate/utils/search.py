@@ -4,11 +4,12 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+import threading
+from datetime import datetime
 from functools import lru_cache, reduce
 from itertools import chain
 from operator import and_, or_
-from typing import TYPE_CHECKING, Any, cast, overload
+from typing import TYPE_CHECKING, Any, Literal, cast, overload
 
 from dateutil.parser import ParserError
 from dateutil.parser import parse as dateutil_parse
@@ -251,29 +252,30 @@ class BaseTermExpr:
         second: int = 55,
         microsecond: int = 0,
     ) -> datetime | tuple[datetime, datetime]:
-        # Lazily import as this can be expensive
-        from dateparser import parse as dateparser_parse
-
         tzinfo = timezone.get_current_timezone()
 
-        # Attempts to parse the text using dateparser
-        # If the text is unparsable it will return None
-        result = dateparser_parse(text)
+        result: datetime | None
+
+        try:
+            # Here we inject 5:55:55 time and if that was not changed
+            # during parsing, we assume it was not specified while
+            # generating the query
+            result = dateutil_parse(
+                text,
+                default=timezone.now().replace(
+                    hour=hour, minute=minute, second=second, microsecond=microsecond
+                ),
+            )
+        except ParserError:
+            # Lazily import as this can be expensive
+            from dateparser import parse as dateparser_parse
+
+            # Attempts to parse the text using dateparser
+            # If the text is unparsable it will return None
+            result = dateparser_parse(text, locales=["en"])
         if not result:
-            try:
-                # Here we inject 5:55:55 time and if that was not changed
-                # during parsing, we assume it was not specified while
-                # generating the query
-                result = dateutil_parse(
-                    text,
-                    default=timezone.now().replace(
-                        hour=hour, minute=minute, second=second, microsecond=microsecond
-                    ),
-                )
-            except ParserError as error:
-                raise ValueError(
-                    gettext("Invalid timestamp: {}").format(error)
-                ) from error
+            msg = "Could not parse timestamp"
+            raise ValueError(msg)
 
         result = result.replace(
             hour=hour,
@@ -612,33 +614,15 @@ class UserTermExpr(BaseTermExpr):
     def convert_non_field(self) -> Q:
         return Q(username__icontains=self.match) | Q(full_name__icontains=self.match)
 
-    def field_extra(self, field: str, query: Q, match: Any) -> Q:  # noqa: ANN401
-        if field == "translates":
-            return query & Q(
-                change__timestamp__gte=timezone.now().replace(
-                    hour=0, minute=0, second=0, microsecond=0
-                )
-                - timedelta(days=90)
-            )
-
-        return super().field_extra(field, query, match)
-
     def contributes_field(self, text: str, context: dict) -> Q:
         from weblate.trans.models import Component
 
-        if "/" in text:
-            query = Q(
-                change__component_id__in=list(
-                    Component.objects.filter_by_path(text).values_list("id", flat=True)
-                )
+        if "/" not in text:
+            return Q(change__project__slug__iexact=text)
+        return Q(
+            change__component_id__in=list(
+                Component.objects.filter_by_path(text).values_list("id", flat=True)
             )
-        else:
-            query = Q(change__project__slug__iexact=text)
-        return query & Q(
-            change__timestamp__gte=timezone.now().replace(
-                hour=0, minute=0, second=0, microsecond=0
-            )
-            - timedelta(days=90)
         )
 
 
@@ -665,11 +649,12 @@ class SuperuserUserTermExpr(UserTermExpr):
         return super().is_field(text, context)
 
 
-PARSERS = {
+PARSERS: dict[Literal["unit", "user", "superuser"], ParserElement] = {
     "unit": build_parser(UnitTermExpr),
     "user": build_parser(UserTermExpr),
     "superuser": build_parser(SuperuserUserTermExpr),
 }
+PARSER_LOCK = threading.Lock()
 
 
 def parser_to_query(obj, context: dict) -> Q:
@@ -697,13 +682,18 @@ def parser_to_query(obj, context: dict) -> Q:
 
 
 @lru_cache(maxsize=512)
-def parse_string(text: str, parser: str) -> ParseResults:
+def parse_string(
+    text: str, parser: Literal["unit", "user", "superuser"]
+) -> ParseResults:
     if "\x00" in text:
         msg = "Invalid query string."
         raise ValueError(msg)
-    return PARSERS[parser].parse_string(text, parse_all=True)
+    with PARSER_LOCK:
+        return PARSERS[parser].parse_string(text, parse_all=True)
 
 
-def parse_query(text: str, parser: str = "unit", **context) -> Q:
+def parse_query(
+    text: str, parser: Literal["unit", "user", "superuser"] = "unit", **context
+) -> Q:
     parsed = parse_string(text, parser)
     return parser_to_query(parsed, context)

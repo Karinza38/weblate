@@ -650,11 +650,13 @@ License of the translation (does not need to be the same as the source code lice
 
 .. _component-agreement:
 
-Contributor agreement
-+++++++++++++++++++++
+Contributor license agreement
++++++++++++++++++++++++++++++
 
-User agreement which needs to be approved before a user can translate this
-component.
+Contributor license agreement which needs to be approved before a user can
+translate this component.
+
+Markdown can be used for text formatting or inserting links.
 
 .. _component-new_lang:
 
@@ -921,6 +923,18 @@ Key filter
 A regular expression that is used to filter units by their keys. It displays only
 those units whose keys match the regular expression that was set
 as the value of this field.
+
+Some examples of filtering:
+
++-------------------------------+----------------------------+
+| Filter description            | Regular expression         |
++===============================+============================+
+| Selected keys only            | ``^(one|two|other)$``      |
++-------------------------------+----------------------------+
+| Exclude app store changelogs  | ``^(?!changelogs/.*$).+$`` |
++-------------------------------+----------------------------+
+| Filter prefixed strings       | ``^translatable``          |
++-------------------------------+----------------------------+
 
 .. note::
 

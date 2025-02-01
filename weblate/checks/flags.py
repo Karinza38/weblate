@@ -15,8 +15,9 @@ from lxml import etree
 
 from weblate.checks.models import CHECKS
 from weblate.checks.parser import (
+    FLAGS_PARSER,
+    FLAGS_PARSER_LOCK,
     SYNTAXCHARS,
-    FlagsParser,
     length_validation,
     multi_value_flag,
     single_value_flag,
@@ -46,7 +47,7 @@ PLAIN_FLAGS["url"] = gettext_lazy("URL")
 PLAIN_FLAGS["auto-java-messageformat"] = gettext_lazy(
     "Automatically detect Java MessageFormat"
 )
-PLAIN_FLAGS["read-only"] = gettext_lazy("Read only")
+PLAIN_FLAGS["read-only"] = gettext_lazy("Read-only")
 PLAIN_FLAGS["strict-same"] = gettext_lazy("Strict unchanged check")
 PLAIN_FLAGS["strict-format"] = gettext_lazy("Strict format string checks")
 PLAIN_FLAGS["forbidden"] = gettext_lazy("Forbidden translation")
@@ -91,7 +92,10 @@ def _parse_flags_text(flags: str) -> Iterator[str | tuple[Any, ...]]:
     state = 0
     name: str
     value: list[Any] = []
-    tokens = list(FlagsParser.parse_string(flags, parseAll=True))
+
+    with FLAGS_PARSER_LOCK:
+        tokens = list(FLAGS_PARSER.parse_string(flags, parse_all=True))
+
     for pos, token in enumerate(tokens):
         if state == 0 and token == ",":
             pass

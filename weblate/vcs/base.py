@@ -102,6 +102,7 @@ class Repository:
             slug=os.path.basename(base_path),
             file_template="{slug}.lock",
             timeout=120,
+            origin=component.full_slug if component else base_path,
         )
         self._config_updated = False
         self.local = local
@@ -109,7 +110,8 @@ class Repository:
             # Create ssh wrapper for possible use
             SSH_WRAPPER.create()
             if not skip_init and not self.is_valid():
-                self.init()
+                with self.lock:
+                    self.create_blank_repository(self.path)
 
     @classmethod
     def get_remote_branch(cls, repo: str):  # noqa: ARG003
@@ -150,7 +152,8 @@ class Repository:
         """Check whether this is a valid repository."""
         raise NotImplementedError
 
-    def init(self) -> None:
+    @classmethod
+    def create_blank_repository(cls, path: str) -> None:
         """Initialize the repository."""
         raise NotImplementedError
 
@@ -171,11 +174,11 @@ class Repository:
         """Generate environment for process execution."""
         return get_clean_env(
             {
-                "GIT_SSH": SSH_WRAPPER.filename,
+                "GIT_SSH": SSH_WRAPPER.filename.as_posix(),
                 "GIT_TERMINAL_PROMPT": "0",
-                "SVN_SSH": SSH_WRAPPER.filename,
+                "SVN_SSH": SSH_WRAPPER.filename.as_posix(),
             },
-            extra_path=SSH_WRAPPER.path,
+            extra_path=SSH_WRAPPER.path.as_posix(),
         )
 
     @classmethod
@@ -559,3 +562,6 @@ class Repository:
 
     def list_remote_branches(self):
         return []
+
+    def compact(self) -> None:
+        return

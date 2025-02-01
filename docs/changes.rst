@@ -1,18 +1,123 @@
-Weblate 5.9
------------
+Weblate 5.10
+------------
 
 Not yet released.
 
 **New features**
 
-* Translation memory import now supports files with XLIFF, PO and CSV formats, see :ref:`memory-user` and `import_memory` command in :ref:`manage`.
+* :ref:`check-rst-references` check to validate reStructuredText references.
+* :ref:`check-rst-syntax` check to validate reStructuredText syntax.
+* API can now produce CSV output.
+* New management command :wladmin:`import_projectbackup` to import :ref:`projectbackup`.
+
+**Improvements**
+
+* Improved error handling in :ref:`machine-translation-setup`.
+* :envvar:`WEBLATE_REGISTRATION_CAPTCHA` is now available in Docker container.
+* :guilabel:`Synchronize` on shared repository now operates on all its components.
+* :ref:`check-punctuation-spacing` ignores markup such as Markdown or reStructuredText.
+* :ref:`autofix-punctuation-spacing` does not alter reStructuredText markup.
+* Improved validation errors in :doc:`/api`, see :ref:`api-errors`.
+* Any language changed into an alias in `Weblate language data <https://github.com/WeblateOrg/language-data/>`__ is now reflected in all existing installations.
+* Blank alias languages (not linked to any translation, profile, component, ...) are now automatically removed.
+* :ref:`check-duplicate` better works with markup such as Markdown or reStructuredText.
+* Automatically use DeepL API Free endpoint for the DeepL API Free authentication keys in :ref:`mt-deepl`.
+* Compatibility with third-party static files storage backends for Django.
+* Improved language compatibility in :ref:`mt-microsoft-translator`.
+* :ref:`check-reused` check gracefully handles languages which are not case sensitive.
+* :ref:`component-enforced_checks` are now applied on strings imported from the repository.
+
+**Bug fixes**
+
+* Fixed translations caching in :ref:`machine-translation-setup`.
+* :ref:`autofix-html` automatic fixups honors the ``ignore-safe-html`` flag.
+
+**Compatibility**
+
+* Running tests using Django test executor is no longer supported, see :doc:`/contributing/tests`.
+* :ref:`check-bbcode` check is now disabled by default. The `bbcode-text` flag is required to activate this check, see :ref:`custom-checks`.
+* API error responses format has changed, see :ref:`api-errors`.
+
+**Upgrading**
+
+Please follow :ref:`generic-upgrade-instructions` in order to perform update.
+
+* There are several changes in :file:`settings_example.py`, most notable are the new settings for :ref:`api` in ``REST_FRAMEWORK``, ``SPECTACULAR_SETTINGS``, ``DRF_STANDARDIZED_ERRORS`` and ``INSTALLED_APPS``; please adjust your settings accordingly.
+* PostgreSQL 12 and MariaDB 10.4 are no longer supported.
+
+**Contributors**
+
+.. include:: changes/contributors/5.10.rst
+
+`All changes in detail <https://github.com/WeblateOrg/weblate/milestone/133?closed=1>`__.
+
+Weblate 5.9.2
+-------------
+
+Released on December 19th 2024.
+
+**Improvements**
+
+* Renamed :ref:`vcs-bitbucket-data-center` to match new product name.
+* :http:get:`/api/users/` supports searching by user ID.
+
+**Bug fixes**
+
+* Avoid query parser crash in multi-threaded environments.
+* Avoid :ref:`autofix` crash on multi-value strings.
+* Make project tokens work when :ref:`2fa` or :ref:`component-agreement` are enforced.
+* Captcha solution were sometimes not accepted.
+
+**Upgrading**
+
+Please follow :ref:`generic-upgrade-instructions` in order to perform update.
+
+**Contributors**
+
+.. include:: changes/contributors/5.9.2.rst
+
+`All changes in detail <https://github.com/WeblateOrg/weblate/milestone/135?closed=1>`__.
+
+Weblate 5.9.1
+-------------
+
+Released on December 16th 2024.
+
+**Bug fixes**
+
+* Fixed publishing package to PyPI.
+
+**Upgrading**
+
+Please follow :ref:`generic-upgrade-instructions` in order to perform update.
+
+**Contributors**
+
+.. include:: changes/contributors/5.9.1.rst
+
+`All changes in detail <https://github.com/WeblateOrg/weblate/milestone/134?closed=1>`__.
+
+Weblate 5.9
+-----------
+
+Released on December 16th 2024.
+
+**New features**
+
+* Per-project :ref:`machine-translation-setup` can now be configured via the Project :ref:`api`.
+
+  * Added :http:get:`/api/projects/{string:project}/machinery_settings/`.
+  * Added :http:post:`/api/projects/{string:project}/machinery_settings/`.
+
+* Translation memory import now supports files with XLIFF, PO and CSV formats, see :ref:`memory-user` and :wladmin:`import_memory` command in :ref:`manage`.
 * The registration CAPTCHA now includes proof-of-work mechanism ALTCHA.
 * Leading problematic characters in CSV are now checks for :ref:`glossary`, see :ref:`check-prohibited-initial-character`.
+* Logging to :ref:`graylog`.
 
 **Improvements**
 
 * :ref:`mt-google-translate-api-v3` now supports :ref:`glossary-mt` (optional).
-* A shortcut to duplicate a component is now available directly in the menu (:guilabel:`Manage` → :guilabel:`Duplicate Component`)
+* A shortcut to duplicate a component is now available directly in the menu (:guilabel:`Manage` → :guilabel:`Duplicate Component`).
 * Included username when generating :ref:`credits`.
 * :ref:`bulk-edit` shows a preview of matched strings.
 * :http:get:`/api/components/(string:project)/(string:component)/` exposes component lock state.
@@ -20,13 +125,21 @@ Not yet released.
 * Added page navigation while :ref:`translating`.
 * :ref:`manage-appearance` now has distinct settings for dark mode.
 * Improved :ref:`translation-propagation` performance.
+* More detailed error messages for :http:post:`/api/translations/(string:project)/(string:component)/(string:language)/file/`.
 
 **Bug fixes**
-* Using the `has:variant` field now correctly displays strings that have variant(s) in the search language, see :ref:`search-strings`.
+
+* Using the ``has:variant`` field now correctly displays strings that have variants in the search language, see :ref:`search-strings`.
+* Saving newly added strings in some formats.
+* :ref:`check-java-printf-format` gracefully handles escaping.
 
 **Compatibility**
 
 * :ref:`rollbar-errors` integration no longer includes client-side error collection.
+* Weblate now requires Git 2.28 or newer.
+* Any custom code that relied on `Change` models signals should be reviewed.
+* :ref:`fedora-messaging` integration needs to be updated to be compatible with this release.
+* :envvar:`WEB_WORKERS` now configures number of threads instead of processes.
 
 **Upgrading**
 
@@ -134,7 +247,7 @@ Released on October 15th 2024.
 **New features**
 
 * Added :ref:`component-key_filter` in the component.
-* :ref:`Searching` now supports filtering by object path and :ref:`date-search`.
+* :doc:`/user/search` now supports filtering by object path and :ref:`date-search`.
 * Merge requests credentials can now be passed in the repository URL, see :ref:`settings-credentials`.
 * :ref:`mt-azure-openai` automatic suggestion service.
 * :ref:`vcs-bitbucket-cloud`.
@@ -151,7 +264,7 @@ Released on October 15th 2024.
 * :kbd:`?` now displays available :ref:`keyboard`.
 * Translation and language view in the project now include basic information about the language and plurals.
 * :ref:`search-replace` shows a preview of matched strings.
-* :ref:`aresource` now supports translatable attribute in its strings.
+* :ref:`aresource` now support translatable attribute in its strings.
 * Creating component via file upload (Translate document) now supports bilingual files.
 
 **Bug fixes**
@@ -163,7 +276,7 @@ Released on October 15th 2024.
 **Compatibility**
 
 * Weblate now requires Python 3.11 or newer.
-* :ref:`mt-aws` now requires the `TranslateFullAccess` permission
+* :ref:`mt-aws` now requires the `TranslateFullAccess` permission.
 
 **Upgrading**
 
@@ -446,7 +559,7 @@ Released on April 26th 2024.
 
 **New features**
 
-* :ref:`Searching` supports ``source_changed:DATETIME``.
+* :doc:`/user/search` supports ``source_changed:DATETIME``.
 * Added several new :ref:`component-language_code_style`.
 
 **Improvements**
@@ -485,7 +598,7 @@ Released on April 20th 2024.
 
 * :ref:`addons` can be now installed project-wide and site-wide.
 
-* API improvements
+* API improvements.
 
   * Added :http:get:`/api/categories/(int:id)/statistics/`.
   * Added :http:get:`/api/projects/(string:project)/file/`.
@@ -718,7 +831,7 @@ Released on November 16th 2023.
 
 **New features**
 
-* :ref:`vcs-azure-devops`
+* :ref:`vcs-azure-devops`.
 
 **Improvements**
 

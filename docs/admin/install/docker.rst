@@ -343,7 +343,7 @@ To reset `admin` password, restart the container with
 Number of processes and memory consumption
 ------------------------------------------
 
-The number of worker processes for both uWSGI and Celery is determined
+The number of worker processes for both WSGI and Celery is determined
 automatically based on number of CPUs. This works well for most cloud virtual
 machines as these typically have few CPUs and good amount of memory.
 
@@ -481,18 +481,39 @@ Generic settings
 
     Configures the logging of the database queries verbosity.
 
+.. envvar:: WEBLATE_LOG_GELF_HOST
+
+   .. versionadded:: 5.9
+
+   Configures remote logging using GELF TCP connection. Can be used to integrate with Graylog.
+
+.. envvar:: WEBLATE_LOG_GELF_PORT
+
+   .. versionadded:: 5.9
+
+   Use custom port for :envvar:`WEBLATE_LOG_GELF_HOST`, defaults to 12201.
+
 .. envvar:: WEBLATE_SITE_TITLE
 
     Changes the site-title shown in the header of all pages.
 
 .. envvar:: WEBLATE_SITE_DOMAIN
 
-    Configures the site domain. This parameter is required.
+   Configures the site domain. This parameter is required.
 
-    .. seealso::
+   Include port if using a non-standard one.
 
-        :ref:`production-site`,
-        :setting:`SITE_DOMAIN`
+   **Example:**
+
+   .. code-block:: yaml
+
+      environment:
+        WEBLATE_SITE_DOMAIN: example.com:8080
+
+   .. seealso::
+
+      :ref:`production-site`,
+      :setting:`SITE_DOMAIN`
 
 .. envvar:: WEBLATE_ADMIN_NAME
 .. envvar:: WEBLATE_ADMIN_EMAIL
@@ -608,6 +629,19 @@ Generic settings
 
         environment:
           WEBLATE_REGISTRATION_OPEN: 0
+
+.. envvar:: WEBLATE_REGISTRATION_CAPTCHA
+
+   .. versionadded:: 5.10
+
+   Configures whether captcha is used for registration and other unauthenticated actions, see :std:setting:`REGISTRATION_CAPTCHA`.
+
+   **Example:**
+
+   .. code-block:: yaml
+
+      environment:
+        WEBLATE_REGISTRATION_CAPTCHA: 0
 
 .. envvar:: WEBLATE_REGISTRATION_ALLOW_BACKENDS
 
@@ -780,7 +814,7 @@ Generic settings
 .. envvar:: WEBLATE_DEFAULT_PULL_MESSAGE
 
     Configures the default title and message for pull requests via API by changing
-    :setting:`DEFAULT_PULL_MESSAGE`
+    :setting:`DEFAULT_PULL_MESSAGE`.
 
     .. seealso::
 
@@ -842,7 +876,7 @@ Generic settings
 .. envvar:: WEBLATE_CSP_FONT_SRC
 .. envvar:: WEBLATE_CSP_FORM_SRC
 
-    Allows to customize ``Content-Security-Policy`` HTTP header.
+    Allows to customize :http:header:`Content-Security-Policy` HTTP header.
 
     .. seealso::
 
@@ -860,11 +894,11 @@ Generic settings
 
 .. envvar:: WEBLATE_LICENSE_REQUIRED
 
-   Configures :setting:`LICENSE_REQUIRED`
+   Configures :setting:`LICENSE_REQUIRED`.
 
 .. envvar:: WEBLATE_WEBSITE_REQUIRED
 
-   Configures :setting:`WEBSITE_REQUIRED`
+   Configures :setting:`WEBSITE_REQUIRED`.
 
 .. envvar:: WEBLATE_HIDE_VERSION
 
@@ -990,6 +1024,12 @@ Generic settings
 
    Configures :setting:`UNUSED_ALERT_DAYS`.
 
+.. envvar:: WEBLATE_UPDATE_LANGUAGES
+
+   .. versionadded:: 4.3.2
+
+   Configures :setting:`UPDATE_LANGUAGES`.
+
 .. envvar:: WEBLATE_CORS_ALLOWED_ORIGINS
 
    .. versionadded:: 4.16
@@ -1110,7 +1150,7 @@ Or the path to a file containing the Python dictionary:
 .. envvar:: WEBLATE_BITBUCKETSERVER_HOST
 .. envvar:: WEBLATE_BITBUCKETSERVER_CREDENTIALS
 
-    Configures :ref:`vcs-bitbucket-server` by changing :setting:`BITBUCKETSERVER_CREDENTIALS`.
+    Configures :ref:`vcs-bitbucket-data-center` by changing :setting:`BITBUCKETSERVER_CREDENTIALS`.
 
 .. envvar:: WEBLATE_BITBUCKETCLOUD_USERNAME
 .. envvar:: WEBLATE_BITBUCKETCLOUD_WORKSPACE
@@ -1320,8 +1360,7 @@ Keycloak
 .. envvar:: WEBLATE_SOCIAL_AUTH_KEYCLOAK_TITLE
 .. envvar:: WEBLATE_SOCIAL_AUTH_KEYCLOAK_IMAGE
 
-    Enables Keycloak authentication, see
-    `documentation <https://github.com/python-social-auth/social-core/blob/master/social_core/backends/keycloak.py>`_.
+    Enables Keycloak authentication, see :doc:`psa:backends/keycloak`.
 
 Linux vendors
 ~~~~~~~~~~~~~
@@ -1437,7 +1476,7 @@ both Weblate and PostgreSQL containers.
 .. envvar:: POSTGRES_SSL_MODE
 
    Configure how PostgreSQL handles SSL in connection to the server, for possible choices see
-   `SSL Mode Descriptions <https://www.postgresql.org/docs/11/libpq-ssl.html#LIBPQ-SSL-SSLMODE-STATEMENTS>`_
+   `SSL Mode Descriptions <https://www.postgresql.org/docs/11/libpq-ssl.html#LIBPQ-SSL-SSLMODE-STATEMENTS>`_.
 
 .. envvar:: POSTGRES_ALTER_ROLE
 
@@ -1871,7 +1910,7 @@ Container settings
 
 .. envvar:: WEB_WORKERS
 
-    Configure how many uWSGI workers should be executed.
+    Configure how many WSGI workers should be executed.
 
     It defaults to :envvar:`WEBLATE_WORKERS`.
 
@@ -1881,6 +1920,11 @@ Container settings
 
         environment:
           WEB_WORKERS: 32
+
+   .. versionchanged:: 5.9
+
+      The Docker container runs two WSGI processes since 5.9 and
+      :envvar:`WEB_WORKERS` configures how many threads each process will have.
 
 .. envvar:: WEBLATE_SERVICE
 
@@ -1911,11 +1955,11 @@ Container settings
 Docker container volumes
 ------------------------
 
-There are two volumes (``data`` and ``cache``) exported by the Weblate container. The
+There are two volumes (:file:`data` and :file:`cache`) exported by the Weblate container. The
 other service containers (PostgreSQL or Redis) have their data volumes as well,
 but those are not covered by this document.
 
-The ``data`` volume is mounted as :file:`/app/data` and is used to store
+The :file:`data` volume is mounted as :file:`/app/data` and is used to store
 Weblate persistent data such as cloned repositories or to customize Weblate
 installation. :setting:`DATA_DIR` describes in more detail what is stored here.
 
@@ -1924,7 +1968,7 @@ configuration, but usually it is stored in
 :file:`/var/lib/docker/volumes/weblate-docker_weblate-data/_data/` (the path
 consist of name of your docker-compose directory, container, and volume names).
 
-The ``cache`` volume is mounted as :file:`/app/cache` and is used to store static
+The :file:`cache` volume is mounted as :file:`/app/cache` and is used to store static
 files and :setting:`CACHE_DIR`. Its content is recreated on container startup
 and the volume can be mounted using ephemeral filesystem such as `tmpfs`.
 
@@ -1932,8 +1976,8 @@ When creating the volumes manually, the directories should be owned by UID 1000
 as that is user used inside the container.
 
 Weblate container can also be executed with a read-only root file system. In
-this case, two additional ``tmpfs`` volumes should be mounted: ``/tmp`` and
-``/run``.
+this case, two additional ``tmpfs`` volumes should be mounted: :file:`/tmp` and
+:file:`/run`.
 
 .. seealso::
 
@@ -2014,7 +2058,7 @@ To override settings at the Docker image level instead of from the data volume:
        USER root
 
        COPY weblate_customization /usr/src/weblate_customization
-       RUN /app/venv/bin/uv pip install --no-cache-dir /usr/src/weblate_customization
+       RUN source /app/venv/bin/activate && uv pip install --no-cache-dir /usr/src/weblate_customization
        ENV DJANGO_SETTINGS_MODULE=weblate_customization.settings
 
        USER 1000

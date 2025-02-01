@@ -3,11 +3,16 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 import os
+from logging.handlers import SysLogHandler
 
 from django.core.exceptions import PermissionDenied
 from django.http import Http404
 
-from weblate.api.spectacular import get_spectacular_settings
+from weblate.api.spectacular import (
+    get_drf_settings,
+    get_drf_standardized_errors_sertings,
+    get_spectacular_settings,
+)
 from weblate.utils.environment import (
     get_env_bool,
     get_env_credentials,
@@ -676,6 +681,7 @@ CSP_FORM_SRC = get_env_list("WEBLATE_CSP_FORM_SRC")
 
 # Allow new user registrations
 REGISTRATION_OPEN = get_env_bool("WEBLATE_REGISTRATION_OPEN", True)
+REGISTRATION_CAPTCHA = get_env_bool("WEBLATE_REGISTRATION_CAPTCHA", True)
 REGISTRATION_REBIND = get_env_bool("WEBLATE_REGISTRATION_REBIND", False)
 REGISTRATION_ALLOW_BACKENDS = get_env_list("WEBLATE_REGISTRATION_ALLOW_BACKENDS")
 
@@ -782,6 +788,7 @@ INSTALLED_APPS = [
     "django_otp_webauthn",
     "drf_spectacular",
     "drf_spectacular_sidecar",
+    "drf_standardized_errors",
 ]
 
 # Legal integration
@@ -819,8 +826,16 @@ DEFAULT_EXCEPTION_REPORTER_FILTER = "weblate.trans.debug.WeblateExceptionReporte
 # - you can also choose "logfile" to log into separate file
 #   after configuring it below
 
-DEFAULT_LOG = "console"
+# Syslog is not present inside Docker
+HAVE_SYSLOG = False
+DEFAULT_LOG = ["console" if DEBUG or not HAVE_SYSLOG else "syslog"]
 DEFAULT_LOGLEVEL = get_env_str("WEBLATE_LOGLEVEL", "DEBUG" if DEBUG else "INFO")
+
+# GELF TCP integration (Graylog)
+WEBLATE_LOG_GELF_HOST = get_env_str("WEBLATE_LOG_GELF_HOST", None)
+
+if WEBLATE_LOG_GELF_HOST:
+    DEFAULT_LOG.append("gelf")
 
 # A sample logging configuration. The only tangible logging
 # performed by this configuration is to send an email to
@@ -859,7 +874,7 @@ LOGGING: dict = {
     },
     "loggers": {
         "django.request": {
-            "handlers": [DEFAULT_LOG],
+            "handlers": [*DEFAULT_LOG],
             "level": "ERROR",
             "propagate": True,
         },
@@ -870,21 +885,74 @@ LOGGING: dict = {
         },
         # Logging database queries
         "django.db.backends": {
-            "handlers": [DEFAULT_LOG],
+            "handlers": [*DEFAULT_LOG],
+            # Toggle to DEBUG to log all database queries
             "level": get_env_str("WEBLATE_LOGLEVEL_DATABASE", "CRITICAL"),
         },
-        "redis_lock": {"handlers": [DEFAULT_LOG], "level": DEFAULT_LOGLEVEL},
-        "weblate": {"handlers": [DEFAULT_LOG], "level": DEFAULT_LOGLEVEL},
+        "redis_lock": {
+            "handlers": [*DEFAULT_LOG],
+            "level": DEFAULT_LOGLEVEL,
+        },
+        "weblate": {
+            "handlers": [*DEFAULT_LOG],
+            "level": DEFAULT_LOGLEVEL,
+        },
         # Logging VCS operations
-        "weblate.vcs": {"handlers": [DEFAULT_LOG], "level": DEFAULT_LOGLEVEL},
+        "weblate.vcs": {
+            "handlers": [*DEFAULT_LOG],
+            "level": DEFAULT_LOGLEVEL,
+        },
         # Python Social Auth
-        "social": {"handlers": [DEFAULT_LOG], "level": DEFAULT_LOGLEVEL},
+        "social": {
+            "handlers": [*DEFAULT_LOG],
+            "level": DEFAULT_LOGLEVEL,
+        },
         # Django Authentication Using LDAP
-        "django_auth_ldap": {"handlers": [DEFAULT_LOG], "level": DEFAULT_LOGLEVEL},
+        "django_auth_ldap": {
+            "handlers": [*DEFAULT_LOG],
+            "level": DEFAULT_LOGLEVEL,
+        },
         # SAML IdP
-        "djangosaml2idp": {"handlers": [DEFAULT_LOG], "level": DEFAULT_LOGLEVEL},
+        "djangosaml2idp": {
+            "handlers": [*DEFAULT_LOG],
+            "level": DEFAULT_LOGLEVEL,
+        },
+        # gunicorn
+        "gunicorn.error": {
+            "level": "INFO",
+            "handlers": [*DEFAULT_LOG],
+            "propagate": True,
+            "qualname": "gunicorn.error",
+        },
     },
 }
+
+# Configure syslog setup if it's present
+if HAVE_SYSLOG:
+    LOGGING["formatters"]["syslog"] = {
+        "format": "weblate[%(process)d]: %(levelname)s %(message)s",
+    }
+    LOGGING["handlers"]["syslog"] = {
+        "level": "DEBUG",
+        "class": "logging.handlers.SysLogHandler",
+        "formatter": "syslog",
+        "address": "/dev/log",
+        "facility": SysLogHandler.LOG_LOCAL2,
+    }
+
+# Configure GELF integration if presetn
+if WEBLATE_LOG_GELF_HOST:
+    LOGGING["formatters"]["gelf"] = {
+        "()": "logging_gelf.formatters.GELFFormatter",
+        "null_character": True,
+    }
+    LOGGING["handlers"]["gelf"] = {
+        "level": "DEBUG",
+        "class": "logging_gelf.handlers.GELFTCPSocketHandler",
+        "formatter": "gelf",
+        "host": WEBLATE_LOG_GELF_HOST,
+        "port": get_env_int("WEBLATE_LOG_GELF_PORT", 12201),
+    }
 
 if get_env_bool("WEBLATE_ADMIN_NOTIFY_ERROR", True):
     LOGGING["loggers"]["django.request"]["handlers"].append("mail_admins")
@@ -1060,6 +1128,8 @@ CHECK_LIST = [
     "weblate.checks.markup.MarkdownSyntaxCheck",
     "weblate.checks.markup.URLCheck",
     "weblate.checks.markup.SafeHTMLCheck",
+    "weblate.checks.markup.RSTReferencesCheck",
+    "weblate.checks.markup.RSTSyntaxCheck",
     "weblate.checks.placeholders.PlaceholderCheck",
     "weblate.checks.placeholders.RegexCheck",
     "weblate.checks.duplicate.DuplicateCheck",
@@ -1208,35 +1278,12 @@ SESSION_ENGINE = os.environ.get(
 MESSAGE_STORAGE = "django.contrib.messages.storage.session.SessionStorage"
 
 # REST framework settings for API
-REST_FRAMEWORK = {
-    # Use Django's standard `django.contrib.auth` permissions,
-    # or allow read-only access for unauthenticated users.
-    "DEFAULT_PERMISSION_CLASSES": [
-        # Require authentication for login required sites
-        "rest_framework.permissions.IsAuthenticated"
-        if REQUIRE_LOGIN
-        else "rest_framework.permissions.IsAuthenticatedOrReadOnly"
-    ],
-    "DEFAULT_AUTHENTICATION_CLASSES": (
-        "rest_framework.authentication.TokenAuthentication",
-        "weblate.api.authentication.BearerAuthentication",
-        "rest_framework.authentication.SessionAuthentication",
-    ),
-    "DEFAULT_THROTTLE_CLASSES": (
-        "weblate.api.throttling.UserRateThrottle",
-        "weblate.api.throttling.AnonRateThrottle",
-    ),
-    "DEFAULT_THROTTLE_RATES": {
-        "anon": get_env_ratelimit("WEBLATE_API_RATELIMIT_ANON", "100/day"),
-        "user": get_env_ratelimit("WEBLATE_API_RATELIMIT_USER", "5000/hour"),
-    },
-    "DEFAULT_PAGINATION_CLASS": "weblate.api.pagination.StandardPagination",
-    "PAGE_SIZE": 50,
-    "VIEW_DESCRIPTION_FUNCTION": "weblate.api.views.get_view_description",
-    "EXCEPTION_HANDLER": "weblate.api.views.weblate_exception_handler",
-    "UNAUTHENTICATED_USER": "weblate.auth.models.get_anonymous",
-    "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
-}
+REST_FRAMEWORK = get_drf_settings(
+    require_login=REQUIRE_LOGIN,
+    anon_throttle=get_env_ratelimit("WEBLATE_API_RATELIMIT_ANON", "100/day"),
+    user_throttle=get_env_ratelimit("WEBLATE_API_RATELIMIT_USER", "5000/hour"),
+)
+DRF_STANDARDIZED_ERRORS = get_drf_standardized_errors_sertings()
 SPECTACULAR_SETTINGS = get_spectacular_settings(INSTALLED_APPS, SITE_URL, SITE_TITLE)
 
 # Fonts CDN URL

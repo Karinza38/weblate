@@ -70,7 +70,7 @@ Released on April 17th 2023.
 * Fixed private project visibility for some teams.
 * Automatic translation now honors target state when translating from other components.
 * Improved performance of public user profiles.
-* Improved Sentry performance integration.
+* Improved Sentry performance monitoring integration.
 * Added support for Ed25519 SSH key.
 * Rewritten metrics storage.
 * Added support for searching strings by position.
@@ -286,7 +286,7 @@ Released on September 15th 2022.
 * Always show review stats when reviews are turned on.
 * Added searching support in units API.
 * Fixed progress bar display for read-only strings in the review workflow.
-* Improved Burmese punctuation check.
+* Improved punctuation checks for Burmese.
 * Fixed garbage collecting of metrics data.
 
 `All changes in detail <https://github.com/WeblateOrg/weblate/milestone/86?closed=1>`__.
@@ -951,7 +951,7 @@ Weblate 4.3.2
 Released on November 4th 2020.
 
 * Fixed crash on certain component file masks.
-* Improved accuracy of the consecutive duplicated words check.
+* Improved accuracy of the consecutive duplicated-words check.
 * Added support for Pagure pull requests.
 * Improved error messages for failed registrations.
 * Reverted rendering developer comments as Markdown.
@@ -1134,7 +1134,7 @@ Released on June 15th 2020.
 * Include source language in project creation form.
 * Include changes count in credits.
 * Fixed UI language selection in some cases.
-* Allow to whitelist registration methods with registrations closed.
+* Possibility to allow certain registration methods with registrations closed.
 * Improved lookup of related terms in glossary.
 * Improved translation memory matches.
 * Group same machinery results.
@@ -1251,7 +1251,7 @@ Released on April 16th 2020.
 * Upgraded Microsoft Translator to version 3 API.
 * Reimplemented translation memory backend.
 * Added support for several ``is:`` lookups in :doc:`/user/search`.
-* Allow to make :ref:`check-same` avoid internal blacklist.
+* Allow to make :ref:`check-same` avoid the built-in words exceptions.
 * Improved comments extraction from monolingual po files.
 * Renamed whiteboard messages to announcements.
 * Fixed occasional problems with registration mails.

@@ -63,7 +63,9 @@ TEST_BACKENDS = (
 SOURCE_FONT = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
     "static",
+    "js",
     "vendor",
+    "fonts",
     "font-source",
     "TTF",
     "SourceSans3-Bold.ttf",
@@ -661,8 +663,7 @@ class SeleniumTests(
             "https://github.com/WeblateOrg/demo.git"
         )
         self.driver.find_element(By.ID, "id_repoweb").send_keys(
-            "https://github.com/WeblateOrg/demo/blob/"
-            "{{branch}}/{{filename}}#L{{line}}"
+            "https://github.com/WeblateOrg/demo/blob/{{branch}}/{{filename}}#L{{line}}"
         )
         self.driver.find_element(By.ID, "id_filemask").send_keys(
             "weblate/langdata/locale/*/LC_MESSAGES/django.po"
@@ -792,8 +793,7 @@ class SeleniumTests(
             )
         element = self.driver.find_element(By.ID, "id_match")
         element.send_keys(
-            "weblate/locale/(?P<language>[^/]*)/LC_MESSAGES/"
-            "(?P<component>[^/]*)\\.po"
+            "weblate/locale/(?P<language>[^/]*)/LC_MESSAGES/(?P<component>[^/]*)\\.po"
         )
         self.clear_field(
             self.driver.find_element(By.ID, "id_language_regex")
@@ -822,7 +822,7 @@ class SeleniumTests(
         self.click("Insights")
         self.screenshot("reporting.png")
 
-        # Contributor agreement
+        # Contributor license agreement
         self.click("Manage")
         with self.wait_for_page_load():
             self.click("Settings")
@@ -834,7 +834,7 @@ class SeleniumTests(
             self.click("Language names")
         self.screenshot("contributor-agreement.png")
         with self.wait_for_page_load():
-            self.click("View contributor agreement")
+            self.click("View contributor license agreement")
         element = self.driver.find_element(By.ID, "id_confirm")
         self.click(element)
         with self.wait_for_page_load():
@@ -984,8 +984,7 @@ class SeleniumTests(
             self.driver.find_element(By.ID, "id_name").submit()
 
         self.driver.find_element(By.ID, "id_repoweb").send_keys(
-            "https://github.com/WeblateOrg/demo/blob/"
-            "{{branch}}/{{filename}}#L{{line}}"
+            "https://github.com/WeblateOrg/demo/blob/{{branch}}/{{filename}}#L{{line}}"
         )
         self.driver.find_element(By.ID, "id_filemask").send_keys(
             "weblate/langdata/locale/*/LC_MESSAGES/django.po"

@@ -6,6 +6,7 @@ from __future__ import annotations
 import re
 from collections import defaultdict
 from datetime import date, datetime
+from html import escape as html_escape
 from typing import TYPE_CHECKING
 
 from django import forms, template
@@ -56,22 +57,21 @@ from weblate.utils.templatetags.icons import icon
 from weblate.utils.views import SORT_CHOICES
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Generator, Iterable
 
+    from django.db.models import QuerySet
     from django_stubs_ext import StrOrPromise
 
     from weblate.metrics.wrapper import MetricsWrapper
 
 register = template.Library()
 
-HIGHLIGTH_SPACE = '<span class="hlspace">{}</span>{}'
-SPACE_TEMPLATE = '<span class="{}">{}</span>'
-SPACE_SPACE = SPACE_TEMPLATE.format("space-space", " ")
-SPACE_NL = HIGHLIGTH_SPACE.format(SPACE_TEMPLATE.format("space-nl", ""), "<br />")
 SPACE_START = '<span class="hlspace"><span class="space-space">'
+SPACE_NL_START = '<span class="hlspace"><span class="space-nl">'
 SPACE_MIDDLE_1 = "</span>"
 SPACE_MIDDLE_2 = '<span class="space-space">'
 SPACE_END = "</span></span>"
+SPACE_NL_END = "</span></span><br>"
 
 GLOSSARY_TEMPLATE = """<span class="glossary-term" title="{}">"""
 
@@ -82,7 +82,9 @@ WHITESPACE_REGEX = (
     r"\u202F|\u205F|\u3000)"
 )
 WHITESPACE_RE = re.compile(WHITESPACE_REGEX, re.MULTILINE)
+NEWLINE_RE = re.compile(r"(\r\n|\r|\n)", re.MULTILINE)
 MULTISPACE_RE = re.compile(r"(  +| $|^ )", re.MULTILINE)
+ESCAPE_RE = re.compile(r"""['"&<>]""")
 TYPE_MAPPING = {True: "yes", False: "no", None: "unknown"}
 # Mapping of status report flags to names
 NAME_MAPPING = {
@@ -121,7 +123,7 @@ class Formatter:
         self.search_match = search_match
         self.match = match
         # Tags output
-        self.tags: list[list[str]] = [[] for i in range(len(value) + 1)]
+        self.tags: dict[int, list[str]] = defaultdict(list)
         self.differ = Differ()
         self.whitespace = whitespace
 
@@ -159,20 +161,23 @@ class Formatter:
                 # Rearrange space highlighting
                 move_space = False
                 start_space = -1
-                for pos, tag in enumerate(self.tags[offset]):
-                    if tag == SPACE_MIDDLE_2:
-                        self.tags[offset][pos] = SPACE_MIDDLE_1
-                        move_space = True
-                        break
-                    if tag == SPACE_START:
-                        start_space = pos
-                        break
+                if offset in self.tags:
+                    for pos, tag in enumerate(self.tags[offset]):
+                        if tag == SPACE_MIDDLE_2:
+                            self.tags[offset][pos] = SPACE_MIDDLE_1
+                            move_space = True
+                            break
+                        if tag == SPACE_START:
+                            start_space = pos
+                            break
 
                 if start_space != -1:
                     self.tags[offset].insert(start_space, "<ins>")
                     last_middle = None
                     for i in range(len(data)):
                         tagoffset = offset + i + 1
+                        if tagoffset not in self.tags:
+                            continue
                         for pos, tag in enumerate(self.tags[tagoffset]):
                             if tag == SPACE_END:
                                 # Whitespace ends within <ins>
@@ -252,8 +257,8 @@ class Formatter:
         translations = []
         for term in terms:
             flags = term.all_flags
-            target = escape(term.target)
-            source = escape(term.source)
+            target = html_escape(term.target)
+            source = html_escape(term.source)
             # Translators: Glossary term formatting used in a tooltip
             formatted = pgettext("glossary term", "{target} [{source}]").format(
                 source=source, target=target
@@ -352,14 +357,20 @@ class Formatter:
 
     def parse_whitespace(self) -> None:
         """Highlight whitespaces."""
-        for match in MULTISPACE_RE.finditer(self.value):
+        value = self.value
+
+        for match in NEWLINE_RE.finditer(value):
+            self.tags[match.start()].append(SPACE_NL_START)
+            self.tags[match.end()].append(SPACE_NL_END)
+
+        for match in MULTISPACE_RE.finditer(value):
             self.tags[match.start()].append(SPACE_START)
             for i in range(match.start() + 1, match.end()):
                 self.tags[i].insert(0, SPACE_MIDDLE_1)
                 self.tags[i].append(SPACE_MIDDLE_2)
             self.tags[match.end()].insert(0, SPACE_END)
 
-        for match in WHITESPACE_RE.finditer(self.value):
+        for match in WHITESPACE_RE.finditer(value):
             whitespace = match.group(0)
             cls = "space-tab" if whitespace == "\t" else "space-space"
             title = get_display_char(whitespace)[0]
@@ -370,37 +381,73 @@ class Formatter:
             )
             self.tags[match.end()].insert(0, "</span></span>")
 
-    def format(self):
+    def format_generator(self) -> Generator[str]:
         tags = self.tags
         value = self.value
-        newline = format_html(SPACE_NL, gettext("New line"))
-        output = []
-        was_cr = False
-        newlines = {"\r", "\n"}
-        for pos, char in enumerate(value):
-            # Special case for single whitespace char in diff
-            if (
-                char == " "
-                and "<ins>" in tags[pos]
-                and SPACE_START not in tags[pos]
-                and "</ins>" in tags[pos + 1]
-            ):
-                tags[pos].append(SPACE_START)
-                tags[pos + 1].insert(0, SPACE_END)
+        current: list[str]
+        replacements: dict[int, str] = {}
 
-            output.append("".join(tags[pos]))
-            if char in newlines and self.whitespace:
-                is_cr = char == "\r"
-                if was_cr and not is_cr:
-                    # treat "\r\n" as single newline
-                    continue
-                was_cr = is_cr
-                output.append(newline)
+        # Extract tag positions
+        positions: set[int] = set(tags.keys())
+
+        # Avoid processing trailing tags in the loop
+        positions.discard(len(value))
+
+        # Replace special characters "&", "<" and ">" to HTML-safe sequences.
+        # This is like html.escape but inline
+        for match in ESCAPE_RE.finditer(value):
+            position = match.start()
+            positions.add(position)
+            char = match.group()
+            if char == "&":
+                next_output = "&amp;"
+            elif char == "<":
+                next_output = "&lt;"
+            elif char == ">":
+                next_output = "&gt;"
+            elif char == '"':
+                next_output = "&quot;"
+            elif char == "'":
+                next_output = "&#x27;"
             else:
-                output.append(escape(char))
+                raise ValueError(char)
+            replacements[position] = next_output
+
+        previous_start = 0
+        for pos in sorted(positions):
+            # String up to current position
+            yield value[previous_start:pos]
+
+            if pos in tags:
+                current = tags[pos]
+                # Special case for single whitespace char in diff
+                if (
+                    current
+                    and value[pos] == " "
+                    and "<ins>" in current
+                    and SPACE_START not in current
+                    and "</ins>" in tags[pos + 1]
+                ):
+                    current.append(SPACE_START)
+                    tags[pos + 1].insert(0, SPACE_END)
+
+                # Tags
+                yield from current
+
+            if pos in replacements:
+                # HTML escaped string
+                yield replacements[pos]
+                previous_start = pos + 1
+            else:
+                previous_start = pos
+
+        yield value[previous_start:]
+
         # Trailing tags
-        output.append("".join(tags[len(value)]))
-        return mark_safe("".join(output))  # noqa: S308
+        yield from tags[len(value)]
+
+    def format(self):
+        return mark_safe("".join(self.format_generator()))  # noqa: S308
 
 
 @register.inclusion_tag("snippets/format-translation.html")
@@ -474,6 +521,7 @@ def format_source_string(
     return format_translation(
         plurals=[value],
         language=unit.translation.component.source_language,
+        plural=unit.translation.plural,
         search_match=search_match,
         match=match,
         simple=simple,
@@ -790,6 +838,7 @@ def review_percent(obj):
         percent=stats.approved_percent + stats.readonly_percent,
         query="q=state:>=approved",
         total=stats.all,
+        checks=stats.allchecks,
         css="zero-width-540",
     )
 
@@ -815,7 +864,7 @@ def translation_progress(obj):
         stats.all,
         stats.readonly,
         stats.approved,
-        stats.translated - stats.translated_checks,
+        stats.translated_without_checks,
         stats.has_review,
     )
 
@@ -827,7 +876,7 @@ def words_progress(obj):
         stats.all_words,
         stats.readonly_words,
         stats.approved_words,
-        stats.translated_words - stats.translated_checks_words,
+        stats.translated_without_checks_words,
         stats.has_review,
     )
 
@@ -839,7 +888,7 @@ def chars_progress(obj):
         stats.all_chars,
         stats.readonly_chars,
         stats.approved_chars,
-        stats.translated_chars - stats.translated_checks_chars,
+        stats.translated_without_checks_chars,
         stats.has_review,
     )
 
@@ -1442,6 +1491,7 @@ def list_objects_percent(
     percent: float,
     value: int,
     total: int,
+    checks: int,
     search_url: str | None = None,
     translate_url: str | None = None,
     query: str = "",
@@ -1459,7 +1509,7 @@ def list_objects_percent(
     else:
         url_start = url_end = ""
 
-    if value and value == total:
+    if value and value == total and checks == 0:
         percent_formatted = format_html(
             """<span class="green" title="{}">{}</span>""",
             ngettext(
@@ -1497,7 +1547,7 @@ def list_objects_percent(
 
 
 @register.inclusion_tag("snippets/info.html", takes_context=True)
-def show_info(
+def show_info(  # noqa: PLR0913
     context,
     *,
     project: Project | None = None,
@@ -1510,6 +1560,8 @@ def show_info(
     show_source: bool = False,
     show_global: bool = False,
     show_full_language: bool = True,
+    top_users: QuerySet[Profile] | None = None,
+    total_translations: int | None = None,
 ):
     """
     Render project information table.
@@ -1528,4 +1580,6 @@ def show_info(
         "show_source": show_source,
         "show_global": show_global,
         "show_full_language": show_full_language,
+        "top_users": top_users,
+        "total_translations": total_translations,
     }

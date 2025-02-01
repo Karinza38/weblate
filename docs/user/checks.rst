@@ -99,10 +99,15 @@ good quality translations.
 BBCode markup
 ~~~~~~~~~~~~~
 
+.. versionchanged:: 5.10
+
+This checks no longer relies on unreliable automatic detection, it now needs to be turned on using the ``bbcode-text`` flag.
+
 :Summary: BBCode in translation does not match source
 :Scope: translated strings
 :Check class: ``weblate.checks.markup.BBCodeCheck``
 :Check identifier: ``bbcode``
+:Flag to enable: ``bbcode-text``
 :Flag to ignore: ``ignore-bbcode``
 
 BBCode represents simple markup, like for example highlighting important parts of a
@@ -959,6 +964,32 @@ This check applies to all components in a project that have
 
    :ref:`translation-consistency`
 
+.. _check-rst-references:
+
+Inconsistent reStructuredText references
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. versionadded:: 5.10
+
+:Summary: Inconsistent reStructuredText term references in the translated message.
+:Scope: translated strings
+:Check class: ``weblate.checks.markup.RSTReferencesCheck``
+:Check identifier: ``rst-references``
+:Flag to enable: ``rst-text``
+:Flag to ignore: ``ignore-rst-references``
+
+reStructuredText term references do not match source, the typical causes for these errors are:
+
+* Mismatched or missing backticks.
+* Missing spaces or interpunction around the reference. The reStructuredText inline blocks need to be separated by non-word characters.
+* Space between inline tag and backticks.
+* The reference name is not being translated.
+* Using quotes instead of backticks.
+
+.. seealso::
+
+   `reStructuredText Primer`_,
+   :ref:`check-rst-syntax`
 
 .. _check-kashida:
 
@@ -1370,6 +1401,30 @@ translation file or defined manually using ``regex`` flag:
 
    regex:^foo|bar$
 
+.. _check-rst-syntax:
+
+reStructuredText syntax error
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. versionadded:: 5.10
+
+:Summary: reStructuredText syntax error in the translation.
+:Scope: translated strings
+:Check class: ``weblate.checks.markup.RSTSyntaxCheck``
+:Check identifier: ``rst-syntax``
+:Flag to enable: ``rst-text``
+:Flag to ignore: ``ignore-rst-syntax``
+
+reStructuredText syntax error in the translation. Issues to look for:
+
+* Mismatched closing/opening tags.
+* Missing spaces or interpunction around the reference. The reStructuredText inline blocks need to be separated by non-word characters.
+* Using quotes instead of backticks.
+
+.. seealso::
+
+   `reStructuredText Primer`_,
+   :ref:`check-rst-references`
 
 .. _check-reused:
 
@@ -1478,18 +1533,18 @@ Unchanged translation
 :Check identifier: ``same``
 :Flag to ignore: ``ignore-same``
 
-Happens if the source and corresponding translation strings is identical, down to
-at least one of the plural forms. Some strings commonly found across all
-languages are ignored, and various markup is stripped. This reduces
-the number of false positives.
+Happens if the source and corresponding translation strings are identical, down
+to at least one of the plural forms. Some strings commonly found across all
+languages are ignored, and various markups are stripped. This reduces the
+number of false positives.
 
 This check can help find strings mistakenly untranslated.
 
-The default behavior of this check is to exclude words from the built-in
-blacklist from the checking. These are words which are frequently not being
+The default behavior of this check is to exclude words from the built-in terms
+list from the checking. These are words which are frequently not being
 translated. This is useful to avoid false positives on short strings, which
-consist only of single word which is same in several languages. This blacklist
-can be disabled by adding ``strict-same`` flag to string or component.
+consist only of a single word which is the same in several languages. This list
+can be disabled by adding ``strict-same`` flag to a string or component.
 
 .. versionchanged:: 4.17
 
@@ -1900,3 +1955,6 @@ For example with Gettext in Python it could be:
     from gettext import ngettext
 
     print(ngettext("Selected %d file", "Selected %d files", files) % files)
+
+
+.. _reStructuredText Primer: https://www.sphinx-doc.org/en/master/usage/restructuredtext/basics.html

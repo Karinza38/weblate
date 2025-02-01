@@ -31,7 +31,17 @@ from weblate.utils.db import adjust_similarity_threshold, using_postgresql
 from weblate.utils.errors import report_error
 
 if TYPE_CHECKING:
-    from weblate.auth.models import AuthenticatedHttpRequest
+    from weblate.auth.models import AuthenticatedHttpRequest, User
+    from weblate.trans.models import Project
+
+
+SUPPORTED_FORMATS = (
+    "json",
+    "tmx",
+    "xliff",
+    "po",
+    "csv",
+)
 
 
 class MemoryImportError(Exception):
@@ -53,7 +63,14 @@ def get_node_data(unit, node):
 
 
 class MemoryQuerySet(models.QuerySet):
-    def filter_type(self, user=None, project=None, use_shared=False, from_file=False):
+    def filter_type(
+        self,
+        *,
+        user: User | None = None,
+        project: Project | None = None,
+        use_shared: bool = False,
+        from_file: bool = False,
+    ):
         base = self
         if "memory_db" in settings.DATABASES:
             base = base.using("memory_db")
@@ -156,6 +173,12 @@ class MemoryManager(models.Manager):
     ):
         origin = os.path.basename(fileobj.name).lower()
         name, extension = os.path.splitext(origin)
+
+        if extension.lower().strip(".") not in SUPPORTED_FORMATS:
+            raise MemoryImportError(
+                gettext("Unsupported file extension: %s") % extension
+            )
+
         if len(name) > 25:
             origin = f"{name[:25]}...{extension}"
 

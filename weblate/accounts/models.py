@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import datetime
+import re
 from datetime import timedelta
 from typing import TYPE_CHECKING, Literal
 from urllib.parse import urlparse
@@ -30,6 +31,7 @@ from django_otp.plugins.otp_totp.models import TOTPDevice
 from django_otp_webauthn.models import WebAuthnCredential
 from rest_framework.authtoken.models import Token
 from social_django.models import UserSocialAuth
+from unidecode import unidecode
 
 from weblate.accounts.avatar import get_user_display
 from weblate.accounts.data import create_default_notifications
@@ -50,7 +52,7 @@ from weblate.utils.html import mail_quote_value
 from weblate.utils.render import validate_editor
 from weblate.utils.request import get_ip_address, get_user_agent
 from weblate.utils.token import get_token
-from weblate.utils.validators import WeblateURLValidator
+from weblate.utils.validators import EMAIL_BLACKLIST, WeblateURLValidator
 from weblate.wladmin.models import get_support_status
 
 if TYPE_CHECKING:
@@ -132,6 +134,32 @@ class WeblateAccountsConf(AppConf):
         prefix = ""
 
 
+# This is essentially a part for django.core.validators.EmailValidator
+DOT_ATOM_RE = re.compile(
+    r"^[-!#$%&'*+/=?^_`{}|~0-9A-Z]+(\.[-!#$%&'*+/=?^_`{}|~0-9A-Z]+)*\Z", re.IGNORECASE
+)
+
+
+def format_private_email(username: str, user_id: int) -> str:
+    if not settings.PRIVATE_COMMIT_EMAIL_TEMPLATE:
+        return ""
+    if username:
+        if username.endswith(".") or ".." in username:
+            # Remove problematic docs
+            username = username.replace(".", "_")
+        if not DOT_ATOM_RE.match(username):
+            # Remove unicode
+            username = unidecode(username)
+        if not DOT_ATOM_RE.match(username) or EMAIL_BLACKLIST.match(username):
+            username = ""
+    if not username:
+        username = f"user-{user_id}"
+    return settings.PRIVATE_COMMIT_EMAIL_TEMPLATE.format(
+        username=username.lower(),
+        site_domain=settings.SITE_DOMAIN.rsplit(":", 1)[0],
+    )
+
+
 class SubscriptionQuerySet(models.QuerySet["Subscription"]):
     def order(self):
         """Ordering in project scope by priority."""
@@ -159,9 +187,15 @@ class Subscription(models.Model):
     objects = SubscriptionQuerySet.as_manager()
 
     class Meta:
-        unique_together = [("notification", "scope", "project", "component", "user")]
         verbose_name = "Notification subscription"
         verbose_name_plural = "Notification subscriptions"
+        constraints = [
+            models.UniqueConstraint(
+                name="accounts_subscription_notification_unique",
+                fields=("notification", "scope", "project", "component", "user"),
+                nulls_distinct=False,
+            ),
+        ]
 
     def __str__(self) -> str:
         return f"{self.user.username}:{self.get_scope_display()},{self.get_notification_display()} ({self.project},{self.component})"
@@ -278,7 +312,9 @@ class AuditLogManager(models.Manager):
 
         return not logins.filter(Q(address=address) | Q(user_agent=user_agent)).exists()
 
-    def create(self, user: User, request: AuthenticatedHttpRequest, activity, **params):
+    def create(
+        self, user: User, request: AuthenticatedHttpRequest | None, activity, **params
+    ):
         address = get_ip_address(request)
         user_agent = get_user_agent(request)
         if activity == "login" and self.is_new_login(user, address, user_agent):
@@ -904,12 +940,7 @@ class Profile(models.Model):
         return email
 
     def get_site_commit_email(self) -> str:
-        if not settings.PRIVATE_COMMIT_EMAIL_TEMPLATE:
-            return ""
-        return settings.PRIVATE_COMMIT_EMAIL_TEMPLATE.format(
-            username=self.user.username,
-            site_domain=settings.SITE_DOMAIN.rsplit(":", 1)[0],
-        )
+        return format_private_email(self.user.username, self.user.pk)
 
     def _get_second_factors(self) -> Iterable[Device]:
         backend: type[Device]
@@ -1038,5 +1069,5 @@ def create_profile_callback(sender, instance, created=False, **kwargs) -> None:
         # Create profile
         instance.profile = Profile.objects.create(user=instance)
         # Create subscriptions
-        if not instance.is_anonymous:
+        if not instance.is_anonymous and not instance.is_bot:
             create_default_notifications(instance)

@@ -75,8 +75,8 @@ Username of users that are not signed in.
 AUDITLOG_EXPIRY
 ---------------
 
-How many days Weblate should keep audit logs (which contain info about account
-activity).
+The maximum number of days Weblate will keep audit logs containing information
+about the account activity.
 
 Defaults to 180 days.
 
@@ -458,7 +458,7 @@ The following subdirectories usually exist:
 
 .. note::
 
-    This directory has to be writable by Weblate. Running it as uWSGI means
+    This directory has to be writable by Weblate. Running it as WSGI means
     the ``www-data`` user should have write access to it.
 
     The easiest way to achieve this is to make the user the owner of the directory:
@@ -846,7 +846,11 @@ List for credentials for GitHub servers.
 
 .. note::
 
-   When creating a fine-grained personal access token, grant read and write access to :guilabel:`Contents` and :guilabel:`Pull requests`.
+   When creating a fine-grained personal access token, grant read and write
+   access to :guilabel:`Contents` and :guilabel:`Pull requests`.
+
+   :guilabel:`Administration` might also be necessary for forking a repository
+   if you intend to use forking and the original repository is not public.
 
 .. hint::
 
@@ -868,7 +872,7 @@ BITBUCKETSERVER_CREDENTIALS
 
 .. versionadded:: 4.16
 
-List for credentials for Bitbucket servers.
+List for credentials for Bitbucket Data Center.
 
 .. code-block:: python
 
@@ -883,7 +887,7 @@ List for credentials for Bitbucket servers.
 
 .. seealso::
 
-   :ref:`vcs-bitbucket-server`,
+   :ref:`vcs-bitbucket-data-center`,
    `Bitbucket: HTTP access token <https://confluence.atlassian.com/bitbucketserver/http-access-tokens-939515499.html>`_
 
 .. setting:: BITBUCKETCLOUD_CREDENTIALS
@@ -923,7 +927,7 @@ Additional settings not described here can be found at :ref:`settings-credential
 .. seealso::
 
    :ref:`vcs-bitbucket-cloud`,
-   `Create an App password <https://support.atlassian.com/bitbucket-cloud/docs/create-an-app-password/>`,
+   `Create an App password <https://support.atlassian.com/bitbucket-cloud/docs/create-an-app-password/>`_,
    `App password permissions <https://support.atlassian.com/bitbucket-cloud/docs/app-password-permissions/>`_
 
 .. setting:: AZURE_DEVOPS_CREDENTIALS
@@ -1512,7 +1516,7 @@ PROJECT_WEB_RESTRICT_RE
 
 .. versionadded:: 4.15
 
-Defines a regular expression to restrict project websites. Any matching URLs will be rejected.
+Defines a regular expression to limit what can be entered as :ref:`project-web`. Any matching URLs will be rejected.
 
 .. seealso::
 
@@ -1638,7 +1642,7 @@ Whether registration of new accounts is currently permitted.
 Defaults to enabled.
 
 This setting affects built-in authentication by e-mail address or through the
-Python Social Auth (you can whitelist certain back-ends using
+Python Social Auth (you can allow certain back-ends using
 :setting:`REGISTRATION_ALLOW_BACKENDS`).
 
 .. note::

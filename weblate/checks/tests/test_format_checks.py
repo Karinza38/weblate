@@ -160,7 +160,7 @@ class PythonFormatCheckTest(CheckTestCase):
             translation=Translation(
                 component=Component(
                     file_format="po",
-                    source_language=Language("en"),
+                    source_language=Language(code="en"),
                 )
             ),
         )
@@ -184,7 +184,7 @@ class PythonFormatCheckTest(CheckTestCase):
             translation=Translation(
                 component=Component(
                     file_format="po",
-                    source_language=Language("en"),
+                    source_language=Language(code="en"),
                 )
             ),
         )
@@ -527,7 +527,7 @@ class PerlBraceFormatCheckTest(CheckTestCase):
             translation=Translation(
                 component=Component(
                     file_format="po",
-                    source_language=Language("en"),
+                    source_language=Language(code="en"),
                 )
             ),
         )
@@ -759,6 +759,11 @@ class JavaFormatCheckTest(CheckTestCase):
 
     def test_escaping(self) -> None:
         self.assertFalse(self.check.check_format("%% s %%", "string", False, None))
+
+    def test_escaping_translation(self) -> None:
+        self.assertFalse(
+            self.check.check_format("Something failed", "Something %%s", False, None)
+        )
 
     def test_format(self) -> None:
         self.assertFalse(self.check.check_format("%s string", "%s string", False, None))

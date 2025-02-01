@@ -7,9 +7,9 @@ from copy import copy
 from datetime import UTC, datetime, timedelta
 from io import BytesIO
 
+import responses
 from django.core.files import File
 from django.urls import reverse
-from rest_framework.exceptions import ErrorDetail
 from rest_framework.test import APITestCase
 from weblate_language_data.languages import LANGUAGES
 
@@ -118,6 +118,7 @@ class APIBaseTest(APITestCase, RepoTestMixin):
         if data is not None:
             for item in skip:
                 del response.data[item]
+            self.maxDiff = None
             self.assertEqual(response.data, data)
         return response
 
@@ -1164,8 +1165,17 @@ class ProjectAPITest(APIBaseTest):
             Component.objects.get(slug="api-project").source_language.code, "ru"
         )
         self.assertEqual(
-            error_response.data["source_language"]["code"][0],
-            "Language with this language code was not found.",
+            error_response.data,
+            {
+                "type": "validation_error",
+                "errors": [
+                    {
+                        "code": "invalid",
+                        "detail": "Language with this language code was not found.",
+                        "attr": "source_language.code",
+                    }
+                ],
+            },
         )
 
     def test_create_with_source_language_string(self, format="json") -> None:  # noqa: A002
@@ -1399,7 +1409,20 @@ class ProjectAPITest(APIBaseTest):
                 "new_lang": "none",
             },
         )
-        self.assertIn("file_format", response.data)
+        self.maxDiff = None
+        self.assertEqual(
+            {
+                "errors": [
+                    {
+                        "attr": "file_format",
+                        "code": "required",
+                        "detail": "This field is required.",
+                    }
+                ],
+                "type": "validation_error",
+            },
+            response.data,
+        )
 
     def test_create_component_link(self) -> None:
         repo_url = self.format_local_path(self.git_repo_path)
@@ -1506,7 +1529,20 @@ class ProjectAPITest(APIBaseTest):
             },
         )
         self.assertEqual(Component.objects.count(), 2)
-        self.assertIn("filemask", response.data)
+        self.maxDiff = None
+        self.assertEqual(
+            {
+                "errors": [
+                    {
+                        "attr": "filemask",
+                        "code": "invalid",
+                        "detail": "The file mask did not match any files.",
+                    }
+                ],
+                "type": "validation_error",
+            },
+            response.data,
+        )
 
     def test_create_component_local(self) -> None:
         response = self.do_request(
@@ -2009,6 +2045,247 @@ class ProjectAPITest(APIBaseTest):
             request={"start": start.isoformat(), "end": end.isoformat(), "lang": "fr"},
         )
         self.assertEqual(response.data, [])
+
+    @responses.activate
+    def test_install_machinery(self) -> None:
+        """Test the machinery settings API endpoint for various scenarios."""
+        from weblate.machinery.tests import AlibabaTranslationTest, DeepLTranslationTest
+
+        # unauthenticated get
+        self.do_request(
+            "api:project-machinery-settings",
+            self.project_kwargs,
+            method="get",
+            code=403,
+            authenticated=True,
+            superuser=False,
+        )
+
+        # unauthenticated post
+        self.do_request(
+            "api:project-machinery-settings",
+            self.project_kwargs,
+            method="post",
+            code=403,
+            authenticated=True,
+            superuser=False,
+            request={"service": "weblate"},
+        )
+
+        # missing service
+        response = self.do_request(
+            "api:project-machinery-settings",
+            self.project_kwargs,
+            method="post",
+            code=400,
+            superuser=True,
+            request={},
+        )
+
+        # unknown service
+        response = self.do_request(
+            "api:project-machinery-settings",
+            self.project_kwargs,
+            method="post",
+            code=400,
+            superuser=True,
+            request={"service": "unknown"},
+        )
+
+        # create configuration: no form
+        response = self.do_request(
+            "api:project-machinery-settings",
+            self.project_kwargs,
+            method="post",
+            code=201,
+            superuser=True,
+            request={"service": "weblate"},
+        )
+
+        # missing required field
+        response = self.do_request(
+            "api:project-machinery-settings",
+            self.project_kwargs,
+            method="post",
+            code=400,
+            superuser=True,
+            request={
+                "service": "deepl",
+                "configuration": {"wrong": ""},
+            },
+            format="json",
+        )
+
+        # invalid field with multipart
+        response = self.do_request(
+            "api:project-machinery-settings",
+            self.project_kwargs,
+            method="post",
+            code=400,
+            superuser=True,
+            request={
+                "service": "deepl",
+                "configuration": "{malformed_json",
+            },
+        )
+
+        # create configuration: valid form with multipart
+        DeepLTranslationTest.mock_response()
+        response = self.do_request(
+            "api:project-machinery-settings",
+            self.project_kwargs,
+            method="post",
+            code=201,
+            superuser=True,
+            request={
+                "service": "deepl",
+                "configuration": '{"key": "x", "url": "https://api.deepl.com/v2/"}',
+            },
+        )
+
+        # create configuration: valid form with json
+        AlibabaTranslationTest().mock_response()
+        response = self.do_request(
+            "api:project-machinery-settings",
+            self.project_kwargs,
+            method="post",
+            code=201,
+            superuser=True,
+            request={
+                "service": "alibaba",
+                "configuration": {
+                    "key": "alibaba-key-v1",
+                    "secret": "alibaba-secret",
+                    "region": "alibaba-region",
+                },
+            },
+            format="json",
+        )
+
+        # update configuration: incorrect method
+        response = self.do_request(
+            "api:project-machinery-settings",
+            self.project_kwargs,
+            method="post",
+            code=400,
+            superuser=True,
+            request={
+                "service": "deepl",
+                "configuration": {
+                    "key": "deepl-key-v1",
+                    "url": "https://api.deepl.com/v2/",
+                },
+            },
+            format="json",
+        )
+
+        # update configuration: valid method
+        response = self.do_request(
+            "api:project-machinery-settings",
+            self.project_kwargs,
+            method="patch",
+            code=200,
+            superuser=True,
+            request={
+                "service": "deepl",
+                "configuration": {
+                    "key": "deepl-key-v2",
+                    "url": "https://api.deepl.com/v2/",
+                },
+            },
+            format="json",
+        )
+
+        # list configurations
+        response = self.do_request(
+            "api:project-machinery-settings",
+            self.project_kwargs,
+            method="get",
+            code=200,
+            superuser=True,
+        )
+        self.assertIn("weblate", response.data)
+        self.assertEqual(response.data["deepl"]["key"], "deepl-key-v2")
+        self.assertEqual(response.data["alibaba"]["key"], "alibaba-key-v1")
+
+        # remove configuration
+        response = self.do_request(
+            "api:project-machinery-settings",
+            self.project_kwargs,
+            method="patch",
+            code=200,
+            superuser=True,
+            request={"service": "deepl", "configuration": None},
+            format="json",
+        )
+
+        # check configuration no longer exists
+        response = self.do_request(
+            "api:project-machinery-settings",
+            self.project_kwargs,
+            method="get",
+            code=200,
+            superuser=True,
+        )
+        self.assertNotIn("deepl", response.data)
+
+        # invalid replace all configurations (missing required config)
+        response = self.do_request(
+            "api:project-machinery-settings",
+            self.project_kwargs,
+            method="put",
+            code=400,
+            superuser=True,
+            request={
+                "deepl": {"key": "deepl-key-valid", "url": "https://api.deepl.com/v2/"},
+                "unknown": {"key": "alibaba-key-invalid"},
+            },
+            format="json",
+        )
+
+        # invalid replace all configurations (missing required config)
+        response = self.do_request(
+            "api:project-machinery-settings",
+            self.project_kwargs,
+            method="put",
+            code=400,
+            superuser=True,
+            request={
+                "deepl": {"key": "deepl-key-valid", "url": "https://api.deepl.com/v2/"},
+                "alibaba": {"key": "alibaba-key-invalid"},
+            },
+            format="json",
+        )
+
+        # replace all configurations
+        new_config = {
+            "deepl": {"key": "deepl-key-v3", "url": "https://api.deepl.com/v2/"},
+            "alibaba": {
+                "key": "alibaba-key-v2",
+                "secret": "alibaba-secret",
+                "region": "alibaba-region",
+            },
+        }
+
+        response = self.do_request(
+            "api:project-machinery-settings",
+            self.project_kwargs,
+            method="put",
+            code=201,
+            superuser=True,
+            request=new_config,
+            format="json",
+        )
+
+        # check all configurations
+        response = self.do_request(
+            "api:project-machinery-settings",
+            self.project_kwargs,
+            method="get",
+            superuser=True,
+        )
+
+        self.assertEqual(new_config, response.data)
 
 
 class ComponentAPITest(APIBaseTest):
@@ -2852,9 +3129,14 @@ class TranslationAPITest(APIBaseTest):
         self.assertEqual(
             response.data,
             {
-                "file": ErrorDetail(
-                    string="Plural forms do not match the language.", code="invalid"
-                )
+                "errors": [
+                    {
+                        "attr": "file",
+                        "code": "invalid",
+                        "detail": "Plural forms do not match the language.",
+                    }
+                ],
+                "type": "validation_error",
             },
         )
 
@@ -3042,6 +3324,21 @@ class TranslationAPITest(APIBaseTest):
             format="json",
             request={"key": "plural", "value": ["Source Language", "Source Languages"]},
             code=200,
+        )
+        self.assertEqual(component.source_translation.unit_set.count(), 6)
+        # Duplicate
+        self.do_request(
+            "api:translation-units",
+            {
+                "language__code": "en",
+                "component__slug": "test",
+                "component__project__slug": "acl",
+            },
+            method="post",
+            superuser=True,
+            format="json",
+            request={"key": "plural", "value": ["Source Language", "Source Languages"]},
+            code=400,
         )
         self.assertEqual(component.source_translation.unit_set.count(), 6)
         self.do_request(
@@ -3416,14 +3713,14 @@ class UnitAPITest(APIBaseTest):
             kwargs={"pk": unit.pk},
             method="patch",
             code=400,
-            request={"state": "100", "target": "Test read only translation"},
+            request={"state": "100", "target": "Test read-only translation"},
         )
         self.do_request(
             "api:unit-detail",
             kwargs={"pk": unit.pk},
             method="patch",
             code=400,
-            request={"state": "0", "target": "Test read only translation"},
+            request={"state": "0", "target": "Test read-only translation"},
         )
         self.do_request(
             "api:unit-detail",
@@ -3639,6 +3936,14 @@ class UnitAPITest(APIBaseTest):
             method="patch",
             code=400,
             superuser=True,
+            request={"labels": ["name"]},
+        )
+        self.do_request(
+            "api:unit-detail",
+            kwargs={"pk": unit.source_unit.pk},
+            method="patch",
+            code=400,
+            superuser=True,
             request={"labels": [label2.id]},
         )
 
@@ -3798,9 +4103,14 @@ class ScreenshotAPITest(APIBaseTest):
                 code=400,
                 superuser=True,
                 data={
-                    "language_code": ErrorDetail(
-                        string="This field is required.", code="invalid"
-                    )
+                    "errors": [
+                        {
+                            "attr": "language_code",
+                            "code": "invalid",
+                            "detail": "This field is required.",
+                        }
+                    ],
+                    "type": "validation_error",
                 },
                 request={
                     "project_slug": "test",
@@ -3815,18 +4125,24 @@ class ScreenshotAPITest(APIBaseTest):
                 code=400,
                 superuser=True,
                 data={
-                    "project_slug": ErrorDetail(
-                        string="Translation matching query does not exist.",
-                        code="invalid",
-                    ),
-                    "component_slug": ErrorDetail(
-                        string="Translation matching query does not exist.",
-                        code="invalid",
-                    ),
-                    "language_code": ErrorDetail(
-                        string="Translation matching query does not exist.",
-                        code="invalid",
-                    ),
+                    "errors": [
+                        {
+                            "attr": "project_slug",
+                            "code": "invalid",
+                            "detail": "Translation matching query does not exist.",
+                        },
+                        {
+                            "attr": "component_slug",
+                            "code": "invalid",
+                            "detail": "Translation matching query does not exist.",
+                        },
+                        {
+                            "attr": "language_code",
+                            "code": "invalid",
+                            "detail": "Translation matching query does not exist.",
+                        },
+                    ],
+                    "type": "validation_error",
                 },
                 request={
                     "name": "Test create screenshot",
@@ -3841,12 +4157,19 @@ class ScreenshotAPITest(APIBaseTest):
             method="post",
             code=400,
             data={
-                "name": [
-                    ErrorDetail(string="This field is required.", code="required")
+                "errors": [
+                    {
+                        "attr": "name",
+                        "code": "required",
+                        "detail": "This field is required.",
+                    },
+                    {
+                        "attr": "image",
+                        "code": "required",
+                        "detail": "No file was submitted.",
+                    },
                 ],
-                "image": [
-                    ErrorDetail(string="No file was submitted.", code="required")
-                ],
+                "type": "validation_error",
             },
             superuser=True,
             request={
@@ -4022,9 +4345,27 @@ class MetricsAPITest(APIBaseTest):
         response = self.client.get(reverse("api:metrics"), {"format": "openmetrics"})
         self.assertContains(response, "# EOF")
 
+    def test_metrics_csv(self) -> None:
+        self.authenticate()
+        response = self.client.get(reverse("api:metrics"), {"format": "csv"})
+        self.assertContains(response, "units_translated")
+
     def test_forbidden(self) -> None:
         response = self.client.get(reverse("api:metrics"))
-        self.assertEqual(response.data["detail"].code, "not_authenticated")
+        self.maxDiff = None
+        self.assertEqual(
+            response.data,
+            {
+                "type": "client_error",
+                "errors": [
+                    {
+                        "attr": None,
+                        "code": "not_authenticated",
+                        "detail": "Authentication credentials were not provided.",
+                    }
+                ],
+            },
+        )
 
     def test_ratelimit(self) -> None:
         self.authenticate()

@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 from glob import glob
 from operator import itemgetter
 from pathlib import Path
+from typing import Literal
 
 from celery import current_task
 from celery.schedules import crontab
@@ -137,7 +138,11 @@ def commit_pending(hours=None, pks=None, logger=None) -> None:
             continue
 
         # All pending units are recent
-        if all(unit.recent_content_changes[0].timestamp > age for unit in units):
+        if all(
+            unit.recent_content_changes
+            and unit.recent_content_changes[0].timestamp > age
+            for unit in units
+        ):
             continue
 
         if logger:
@@ -349,19 +354,33 @@ def component_after_save(
     changed_setup: bool,
     changed_template: bool,
     changed_variant: bool,
+    changed_enforced_checks: bool,
     skip_push: bool,
     create: bool,
-):
+) -> dict[Literal["component"], int]:
     component = Component.objects.get(pk=pk)
     component.after_save(
         changed_git=changed_git,
         changed_setup=changed_setup,
         changed_template=changed_template,
         changed_variant=changed_variant,
+        changed_enforced_checks=changed_enforced_checks,
         skip_push=skip_push,
         create=create,
     )
     return {"component": pk}
+
+
+@app.task(
+    trail=False,
+    autoretry_for=(Component.DoesNotExist, WeblateLockTimeoutError),
+    retry_backoff=60,
+)
+@transaction.atomic
+def update_enforced_checks(component: int | Component) -> None:
+    if isinstance(component, int):
+        component = Component.objects.get(pk=component)
+    component.update_enforced_checks()
 
 
 @app.task(trail=False)
@@ -519,29 +538,30 @@ def auto_translate_component(
     auto_source: str,
     engines: list[str],
     threshold: int,
-    component: int | None,
+    component: int | None = None,
 ):
     component_obj = Component.objects.get(pk=component_id)
 
-    for translation in component_obj.translation_set.iterator():
-        if translation.is_source:
-            continue
+    with component_obj.lock:
+        for translation in component_obj.translation_set.iterator():
+            if translation.is_source:
+                continue
 
-        auto_translate(
-            None,
-            translation.pk,
-            mode,
-            filter_type,
-            auto_source,
-            component,
-            engines,
-            threshold,
-            translation=translation,
-            component_wide=True,
-        )
-    component_obj.update_source_checks()
-    component_obj.run_batched_checks()
-    return {"component": component_obj.id}
+            auto_translate(
+                None,
+                translation.pk,
+                mode,
+                filter_type,
+                auto_source,
+                component,
+                engines,
+                threshold,
+                translation=translation,
+                component_wide=True,
+            )
+        component_obj.update_source_checks()
+        component_obj.run_batched_checks()
+        return {"component": component_obj.id}
 
 
 @app.task(trail=False)

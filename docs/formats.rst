@@ -1,7 +1,7 @@
 .. _formats:
 
-Supported file formats
-======================
+Localization file formats
+=========================
 
 Weblate supports a wide range of translation formats. Each format is slightly
 different and provides a different set of capabilities.
@@ -12,12 +12,6 @@ different and provides a different set of capabilities.
     well established format in the toolkit/platform you use. This way your
     translators can additionally use whatever tools they are used to, and will more
     likely contribute to your project.
-
-.. toctree::
-   :maxdepth: 1
-   :glob:
-
-   formats/*
 
 .. seealso::
 
@@ -446,7 +440,7 @@ This feature is modelled on flags in :ref:`gettext`.
 Additionally, for all XML based format, the flags are extracted from the
 non-standard attribute ``weblate-flags``. Additionally ``max-length:N`` is
 supported through the ``maxwidth`` `attribute
-<http://docs.oasis-open.org/xliff/v1.2/os/xliff-core.html#maxwidth>`_ as
+<https://docs.oasis-open.org/xliff/v1.2/os/xliff-core.html#maxwidth>`_ as
 defined in the XLIFF standard, see :ref:`xliff-flags`.
 
 .. seealso::

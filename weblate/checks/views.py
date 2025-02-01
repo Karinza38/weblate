@@ -221,7 +221,7 @@ class CheckList(PathViewMixin, ListView):
         elif self.check_obj is not None and self.path_object is None:
             context["title"] = self.check_obj.name
         elif self.check_obj is None and self.path_object is not None:
-            context["title"] = f'{gettext("Failing checks")} / {self.path_object}'
+            context["title"] = f"{gettext('Failing checks')} / {self.path_object}"
         else:
             context["title"] = f"{self.check_obj.name} / {self.path_object}"
         if self.check_obj is None:
@@ -270,5 +270,9 @@ def render_check(request: AuthenticatedHttpRequest, unit_id, check_id):
         unit = get_object_or_404(Unit, pk=int(unit_id))
         obj = Check(unit=unit, dismissed=False, name=check_id)
     request.user.check_access_component(obj.unit.translation.component)
+
+    if obj.check_obj is None:
+        msg = "No check object found."
+        raise Http404(msg)
 
     return obj.check_obj.render(request, obj.unit)

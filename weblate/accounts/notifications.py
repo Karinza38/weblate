@@ -32,6 +32,7 @@ from weblate.auth.models import User
 from weblate.lang.models import Language
 from weblate.logger import LOGGER
 from weblate.trans.models import Alert, Change, Component, Project, Translation
+from weblate.utils.errors import report_error
 from weblate.utils.markdown import get_mention_users
 from weblate.utils.ratelimit import rate_limit
 from weblate.utils.site import get_site_domain, get_site_url
@@ -86,6 +87,16 @@ def register_notification(handler: type[Notification]):
 
 def is_notificable_action(action: int) -> bool:
     return action in NOTIFICATIONS_ACTIONS
+
+
+def dispatch_changes_notifications(changes: Iterable[Change]) -> None:
+    from weblate.accounts.tasks import notify_changes
+
+    notifiable: list[int] = [
+        change.pk for change in changes if is_notificable_action(change.action)
+    ]
+    if notifiable:
+        notify_changes.delay_on_commit(notifiable)
 
 
 class Notification:
@@ -302,8 +313,10 @@ class Notification:
         if changes is not None:
             result["changes"] = changes
         if subscription is not None:
-            result["unsubscribe_url"] = "{}?i={}".format(
-                reverse("unsubscribe"), TimestampSigner().sign(f"{subscription.pk}")
+            result["unsubscribe_url"] = get_site_url(
+                "{}?i={}".format(
+                    reverse("unsubscribe"), TimestampSigner().sign(f"{subscription.pk}")
+                )
             )
             result["subscription_user"] = subscription.user
         else:
@@ -329,21 +342,21 @@ class Notification:
             )
             for attrib in attribs:
                 result[attrib] = getattr(change, attrib)
-        if result.get("translation"):
-            result["translation_url"] = get_site_url(
-                result["translation"].get_absolute_url()
-            )
+            if change.translation:
+                result["translation_url"] = get_site_url(
+                    change.translation.get_absolute_url()
+                )
         return result
 
     def get_headers(self, context):
         headers = get_email_headers(self.get_name())
 
         # Set From header to contain user full name
-        user = context.get("user")
-        if user:
-            headers["From"] = formataddr(
-                (context["user"].get_visible_name(), settings.DEFAULT_FROM_EMAIL)
-            )
+        if user := context.get("user"):
+            from_name = user.get_visible_name()
+        else:
+            from_name = settings.SITE_TITLE
+        headers["From"] = formataddr((from_name, settings.DEFAULT_FROM_EMAIL))
 
         # References for unit events
         references = None
@@ -421,18 +434,24 @@ class Notification:
             context = self.get_context(subscription=subscription, changes=changes)
             subject = self.render_template("_subject.txt", context, digest=True)
             context["subject"] = subject
-            LOGGER.info(
-                "sending digest notification %s on %d changes to %s",
-                self.get_name(),
-                len(changes),
-                email,
-            )
-            self.send(
-                email,
-                subject,
-                self.render_template(".html", context, digest=True),
-                self.get_headers(context),
-            )
+            try:
+                body = self.render_template(".html", context, digest=True)
+            except Exception:
+                report_error("Could not render changes", level="critical")
+                LOGGER.exception(
+                    "sending digest notification %s on %d changes to %s failed",
+                    self.get_name(),
+                    len(changes),
+                    email,
+                )
+            else:
+                LOGGER.info(
+                    "sending digest notification %s on %d changes to %s",
+                    self.get_name(),
+                    len(changes),
+                    email,
+                )
+                self.send(email, subject, body, self.get_headers(context))
 
     def notify_digest(
         self,

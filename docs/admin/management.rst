@@ -404,8 +404,8 @@ be made simple using wildcards, or it can use the full power of regular expressi
 The simple matching uses ``**`` for component name and ``*`` for language, for
 example: ``**/*.po``
 
-The regular expression has to contain groups named `component` and `language`.
-For example: ``(?P<language>[^/]*)/(?P<component>[^-/]*)\.po``
+The regular expression has to contain groups named `component` and `language`,
+for example: ``(?P<language>[^/]*)/(?P<component>[^-/]*)\.po``.
 
 The import matches existing components based on files and adds the ones that
 do not exist. It does not change already existing ones.
@@ -465,8 +465,8 @@ separate a folder with the translations of each chapter:
 
     weblate import_project \
         debian-handbook \
-        git://anonscm.debian.org/debian-handbook/debian-handbook.git \
-        squeeze/master \
+        https://salsa.debian.org/hertzog/debian-handbook.git \
+        bullseye/main \
         '*/**.po'
 
 Then the Tanaguru tool, where the file format needs be specified,
@@ -530,6 +530,19 @@ Importing Sphinx documentation split to multiple files and directories:
 
     More detailed examples can be found in the :ref:`starting` chapter,
     alternatively you might want to use :wladmin:`import_json`.
+
+import_projectbackup
+--------------------
+
+.. weblate-admin:: import_projectbackup <project_name> <project_slug> <username> <filename>
+
+.. versionadded:: 5.10
+
+Imports :ref:`projectbackup`.
+
+.. hint::
+
+   Usually it is more comfortable to import project when :ref:`adding-projects`.
 
 importuserdata
 --------------
@@ -636,6 +649,8 @@ list_translators
 .. weblate-admin:: list_translators <project|project/component>
 
 Lists translators by contributed language for the given project:
+
+.. code-block:: text
 
     [French]
     Jean Dupont <jean.dupont@example.com>

@@ -14,6 +14,7 @@ import re
 import urllib.parse
 from configparser import NoOptionError, NoSectionError, RawConfigParser
 from json import JSONDecodeError, dumps
+from pathlib import Path
 from time import sleep, time
 from typing import TYPE_CHECKING, Any, NoReturn, NotRequired, TypedDict, cast
 from zipfile import ZipFile
@@ -27,7 +28,7 @@ from django.utils.translation import gettext, gettext_lazy
 from git.config import GitConfigParser
 from requests.exceptions import HTTPError
 
-from weblate.utils.data import data_dir
+from weblate.utils.data import data_dir, data_path
 from weblate.utils.errors import report_error
 from weblate.utils.files import is_excluded, remove_tree
 from weblate.utils.lock import WeblateLock, WeblateLockTimeoutError
@@ -84,7 +85,7 @@ class GitRepository(Repository):
 
     name: StrOrPromise = "Git"
     push_label = gettext_lazy("This will push changes to the upstream Git repository.")
-    req_version: str | None = "2.12"
+    req_version: str | None = "2.28"
     default_branch = "master"
     ref_to_remote = "..{0}"
     ref_from_remote = "{0}.."
@@ -96,17 +97,11 @@ class GitRepository(Repository):
         ) or os.path.exists(os.path.join(self.path, "config"))
 
     @classmethod
-    def _init(cls, path: str) -> None:
-        cls._popen(["init", "--template=", path])
-        if cls.default_branch != "master":
-            # We could do here just init --initial-branch {branch}, but that does not
-            # work in Git before 2.28.0
-            with open(os.path.join(path, ".git/HEAD"), "w") as handle:
-                handle.write("ref: refs/heads/main\n")
-
-    def init(self) -> None:
+    def create_blank_repository(cls, path: str) -> None:
         """Initialize the repository."""
-        self._init(self.path)
+        cls._popen(
+            ["init", "--template=", "--initial-branch", cls.default_branch, path]
+        )
 
     @classmethod
     def get_remote_branch(cls, repo: str):
@@ -127,7 +122,9 @@ class GitRepository(Repository):
         raise RepositoryError(0, "Could not figure out remote branch")
 
     @staticmethod
-    def git_config_update(filename: str, *updates: tuple[str, str, str | None]) -> None:
+    def git_config_update(
+        filename: Path, *updates: tuple[str, str, str | None]
+    ) -> None:
         # First, open file read-only to check current settings
         modify = False
         with GitConfigParser(file_or_files=filename, read_only=True) as config:
@@ -156,13 +153,16 @@ class GitRepository(Repository):
                         continue
                     if old == value:
                         continue
-                except (NoSectionError, NoOptionError):
+                except NoSectionError:
+                    if value is not None:
+                        config.add_section(section)
+                except NoOptionError:
                     pass
                 if value is not None:
-                    config.set_value(section, key, value)
+                    config.set(section, key, value)
 
     def config_update(self, *updates: tuple[str, str, str | None]) -> None:
-        filename = os.path.join(self.path, ".git", "config")
+        filename = Path(self.path) / ".git" / "config"
         self.git_config_update(filename, *updates)
 
     def check_config(self) -> None:
@@ -489,7 +489,7 @@ class GitRepository(Repository):
                 )
             )
 
-        filename = os.path.join(data_dir("home"), ".gitconfig")
+        filename = data_path("home") / ".gitconfig"
         attempts = 0
         while attempts < 5:
             try:
@@ -566,6 +566,9 @@ class GitRepository(Repository):
 
         return "\n".join(result)
 
+    def compact(self) -> None:
+        self.execute(["gc"])
+
 
 class GitWithGerritRepository(GitRepository):
     name = "Gerrit"
@@ -613,7 +616,6 @@ class GitWithGerritRepository(GitRepository):
 
 class SubversionRepository(GitRepository):
     name = "Subversion"
-    req_version = "2.12"
     default_branch = "master"
     push_label = gettext_lazy("This will commit changes to the Subversion repository.")
 
@@ -1153,10 +1155,10 @@ class GitMergeRequestBase(GitForcePushRepository):
         self.log(f"HTTP {method} {url}")
         cache_id = self.request_time_cache_key
         lock = WeblateLock(
-            data_dir("home"),
-            f"vcs:api:{vcs_id}",
-            0,
-            vcs_id,
+            lock_path=data_dir("home"),
+            scope=f"vcs:api:{vcs_id}",
+            key=0,
+            slug=vcs_id,
             timeout=3 * max(settings.VCS_API_DELAY, 10),
         )
         try:
@@ -1164,7 +1166,7 @@ class GitMergeRequestBase(GitForcePushRepository):
                 next_api_time = cache.get(cache_id)
                 now = time()
                 if next_api_time is not None and now < next_api_time:
-                    with sentry_sdk.start_span(op="api_sleep", name=vcs_id):
+                    with sentry_sdk.start_span(op="vcs.api_sleep", name=vcs_id):
                         sleep(next_api_time - now)
                 try:
                     response = requests.request(
@@ -1724,8 +1726,9 @@ class LocalRepository(GitRepository):
         return cls.default_branch
 
     @classmethod
-    def _init(cls, path: str) -> None:
-        super()._init(path)
+    def create_blank_repository(cls, path: str) -> None:
+        """Initialize the repository."""
+        super().create_blank_repository(path)
         with open(os.path.join(path, "README.md"), "w") as handle:
             handle.write("Translations repository created by Weblate\n")
             handle.write("==========================================\n")
@@ -1743,7 +1746,7 @@ class LocalRepository(GitRepository):
     ) -> None:
         if not os.path.exists(target):
             os.makedirs(target)
-        cls._init(target)
+        cls.create_blank_repository(target)
 
     @cached_property
     def last_remote_revision(self):
@@ -2051,14 +2054,14 @@ class PagureRepository(GitMergeRequestBase):
 
 
 class BitbucketServerRepository(GitMergeRequestBase):
-    # Translators: Bitbucket Server is a product name, it differs from Bitbucked Cloud
-    name = gettext_lazy("Bitbucket Server pull request")
+    # Translators: Bitbucket Data Center is a product name, it differs from Bitbucked Cloud
+    name = gettext_lazy("Bitbucket Data Center pull request")
     identifier = "bitbucketserver"
     _version = None
     API_TEMPLATE = "{scheme}://{host}/rest/api/1.0/projects/{owner}/repos/{slug}"
     bb_fork: dict = {}
     push_label = gettext_lazy(
-        "This will push changes and create a Bitbucket Server pull request."
+        "This will push changes and create a Bitbucket Data Center pull request."
     )
 
     def get_headers(self, credentials: GitCredentials) -> dict[str, str]:
@@ -2079,7 +2082,7 @@ class BitbucketServerRepository(GitMergeRequestBase):
         if "This repository URL is already taken." in error_message:
             page = 0
             self.bb_fork = {}
-            forks_url = f'{credentials["url"]}/forks'
+            forks_url = f"{credentials['url']}/forks"
             while True:
                 forks, response, error_message = self.request(
                     "get", credentials, forks_url, params={"limit": 1000, "start": page}
@@ -2151,7 +2154,7 @@ class BitbucketServerRepository(GitMergeRequestBase):
         if not self.bb_fork:
             self.create_fork(credentials)
 
-        pr_url = f'{credentials["url"]}/pull-requests'
+        pr_url = f"{credentials['url']}/pull-requests"
         title, description = self.get_merge_message()
         request_body = {
             "title": title,
@@ -2180,7 +2183,7 @@ class BitbucketServerRepository(GitMergeRequestBase):
         )
 
         """
-        Bitbucket Server will return an error if a PR already exists.
+        Bitbucket Data Center will return an error if a PR already exists.
         The push method in the parent class pushes changes to the correct
         fork or branch, and always calls this create_pull_request method after.
         If the PR exists already just do nothing because Bitbucket will
@@ -2188,8 +2191,7 @@ class BitbucketServerRepository(GitMergeRequestBase):
         """
         if "id" not in response_data:
             pr_exist_message = (
-                "Only one pull request may be open "
-                "for a given source and target branch"
+                "Only one pull request may be open for a given source and target branch"
             )
             if pr_exist_message in error_message:
                 return

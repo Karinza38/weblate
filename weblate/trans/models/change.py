@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, overload
 
 import sentry_sdk
 from django.conf import settings
@@ -23,16 +23,32 @@ from weblate.lang.models import Language
 from weblate.trans.mixins import UserDisplayMixin
 from weblate.trans.models.alert import ALERTS
 from weblate.trans.models.project import Project
+from weblate.trans.signals import change_bulk_create
 from weblate.utils.decorators import disable_for_loaddata
 from weblate.utils.pii import mask_email
 from weblate.utils.state import StringState
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from weblate.auth.models import User
     from weblate.trans.models import Translation
 
 
 CHANGE_PROJECT_LOOKUP_KEY = "change:project-lookup"
+
+PREFETCH_FIELDS = (
+    "user",
+    "author",
+    "translation",
+    "component",
+    "project",
+    "component__source_language",
+    "unit",
+    "unit__source_unit",
+    "translation__language",
+    "translation__plural",
+)
 
 
 def dt_as_day_range(dt: datetime | date) -> tuple[datetime, datetime]:
@@ -51,22 +67,24 @@ def dt_as_day_range(dt: datetime | date) -> tuple[datetime, datetime]:
 
 
 class ChangeQuerySet(models.QuerySet["Change"]):
-    def content(self, prefetch=False):
+    def content(self, prefetch=False) -> ChangeQuerySet:
         """Return queryset with content changes."""
         base = self
         if prefetch:
             base = base.prefetch()
         return base.filter(action__in=Change.ACTIONS_CONTENT)
 
-    def for_category(self, category):
+    def for_category(self, category) -> ChangeQuerySet:
         return self.filter(
             Q(component_id__in=category.all_component_ids) | Q(category=category)
         )
 
-    def filter_announcements(self):
+    def filter_announcements(self) -> ChangeQuerySet:
         return self.filter(action=Change.ACTION_ANNOUNCEMENT)
 
-    def count_stats(self, days: int, step: int, dtstart: datetime):
+    def count_stats(
+        self, days: int, step: int, dtstart: datetime
+    ) -> list[tuple[datetime, int]]:
         """Count the number of changes in a given period grouped by step days."""
         # Count number of changes
         result = []
@@ -96,7 +114,7 @@ class ChangeQuerySet(models.QuerySet["Change"]):
         translation=None,
         language=None,
         user=None,
-    ):
+    ) -> list[tuple[datetime, int]]:
         """Core of daily/weekly/monthly stats calculation."""
         # Get range (actually start)
         dtstart = timezone.now() - timedelta(days=days + 1)
@@ -122,26 +140,33 @@ class ChangeQuerySet(models.QuerySet["Change"]):
 
         return base.count_stats(days, step, dtstart)
 
-    def prefetch(self):
+    def prefetch_for_get(self) -> ChangeQuerySet:
+        return self.select_related(
+            "alert",
+            "screenshot",
+            "announcement",
+            "suggestion",
+            "comment",
+            *PREFETCH_FIELDS,
+        )
+
+    def prefetch(self) -> ChangeQuerySet:
         """
         Fetch related fields at once to avoid loading them individually.
 
         Call prefetch or prefetch_list later on paginated results to complete.
         """
-        return self.prefetch_related(
-            "user",
-            "author",
-            "translation",
-            "component",
-            "project",
-            "component__source_language",
-            "unit",
-            "unit__source_unit",
-            "translation__language",
-            "translation__plural",
-        )
+        return self.prefetch_related(*PREFETCH_FIELDS)
 
-    def preload_list(self, results, skip: str | None = None):
+    @overload
+    def preload_list(
+        self, results: ChangeQuerySet, skip: str | None = None
+    ) -> ChangeQuerySet: ...
+    @overload
+    def preload_list(
+        self, results: list[Change], skip: str | None = None
+    ) -> list[Change]: ...
+    def preload_list(self, results, skip=None):
         """Companion for prefetch to fill in nested references."""
         for item in results:
             if item.component and skip != "component":
@@ -157,7 +182,7 @@ class ChangeQuerySet(models.QuerySet["Change"]):
         date_range: tuple[datetime, datetime] | None = None,
         *,
         values_list: tuple[str, ...] = (),
-    ):
+    ) -> Iterable[tuple]:
         """Return list of authors."""
         authors = self.content()
         if date_range is not None:
@@ -175,35 +200,42 @@ class ChangeQuerySet(models.QuerySet["Change"]):
             )
         )
 
-    def order(self):
+    def order(self) -> ChangeQuerySet:
         return self.order_by("-timestamp")
 
-    def recent(self, *, count: int = 10, skip_preload: str | None = None):
+    def recent(
+        self, *, count: int = 10, skip_preload: str | None = None
+    ) -> list[Change]:
         """
         Return recent changes to show on object pages.
 
         This uses iterator() as server-side cursors are typically
         more effective here.
         """
-        result = []
-        with transaction.atomic(), sentry_sdk.start_span(op="recent changes"):
+        result: list[Change] = []
+        with transaction.atomic(), sentry_sdk.start_span(op="change.recent"):
             for change in self.order().iterator(chunk_size=count):
                 result.append(change)
                 if len(result) >= count:
                     break
             return self.preload_list(result, skip_preload)
 
-    def bulk_create(self, *args, **kwargs):
+    def bulk_create(self, *args, **kwargs) -> list[Change]:
         """
         Bulk creation of changes.
 
         Add processing to bulk creation.
         """
+        from weblate.accounts.notifications import dispatch_changes_notifications
+
         changes = super().bulk_create(*args, **kwargs)
-        # Executes post save to ensure messages are sent as notifications
-        # or to fedora messaging
-        for change in changes:
-            post_save.send(change.__class__, instance=change, created=True)
+
+        # Dispatch notifications
+        dispatch_changes_notifications(changes)
+
+        # Executes post save to ensure messages are sent to fedora messaging
+        change_bulk_create.send(Change, instances=changes)
+
         # Store last content change in cache for improved performance
         translations = set()
         for change in reversed(changes):
@@ -217,7 +249,7 @@ class ChangeQuerySet(models.QuerySet["Change"]):
                 translations.add(change.translation_id)
         return changes
 
-    def filter_components(self, user: User):
+    def filter_components(self, user: User) -> ChangeQuerySet:
         if not user.needs_component_restrictions_filter:
             return self
         return self.filter(
@@ -226,7 +258,7 @@ class ChangeQuerySet(models.QuerySet["Change"]):
             | Q(component_id__in=user.component_permissions)
         )
 
-    def filter_projects(self, user: User):
+    def filter_projects(self, user: User) -> ChangeQuerySet:
         if not user.needs_project_filter:
             return self
         return self.filter(project__in=user.allowed_projects)
@@ -243,14 +275,14 @@ class ChangeQuerySet(models.QuerySet["Change"]):
             return None
 
     def generate_project_rename_lookup(self) -> dict[str, int]:
-        lookup = {}
+        lookup: dict[str, int] = {}
         for change in self.filter(action=Change.ACTION_RENAME_PROJECT).order():
-            if change.old not in lookup:
+            if change.old not in lookup and change.project_id is not None:
                 lookup[change.old] = change.project_id
         cache.set(CHANGE_PROJECT_LOOKUP_KEY, lookup, 3600 * 24 * 7)
         return lookup
 
-    def filter_by_day(self, dt: datetime | date):
+    def filter_by_day(self, dt: datetime | date) -> ChangeQuerySet:
         """
         Filter changes by given date.
 
@@ -258,13 +290,26 @@ class ChangeQuerySet(models.QuerySet["Change"]):
         """
         return self.filter(timestamp__range=dt_as_day_range(dt))
 
-    def since_day(self, dt: datetime | date):
+    def since_day(self, dt: datetime | date) -> ChangeQuerySet:
         """
         Filter changes since given date.
 
         Optimized to use Database index by not converting timestamp to date object
         """
         return self.filter(timestamp__gte=dt_as_day_range(dt)[0])
+
+    def count_users(self) -> int:
+        """
+        Count contributing users.
+
+        Used mostly in the metrics.
+        """
+        return (
+            self.filter(user__is_active=True, user__is_bot=False)
+            .values("user")
+            .distinct()
+            .count()
+        )
 
 
 class ChangeManager(models.Manager["Change"]):
@@ -395,6 +440,7 @@ class Change(models.Model, UserDisplayMixin):
     ACTION_NEW_UNIT_UPLOAD = 73
     ACTION_SOURCE_UPLOAD = 74
     ACTION_COMPLETED_COMPONENT = 75
+    ACTION_ENFORCED_CHECK = 76
 
     ACTION_CHOICES = (
         # Translators: Name of event in the history
@@ -498,7 +544,10 @@ class Change(models.Model, UserDisplayMixin):
         # Translators: Name of event in the history
         (ACTION_LICENSE_CHANGE, gettext_lazy("License changed")),
         # Translators: Name of event in the history
-        (ACTION_AGREEMENT_CHANGE, gettext_lazy("Contributor agreement changed")),
+        (
+            ACTION_AGREEMENT_CHANGE,
+            gettext_lazy("Contributor license agreement changed"),
+        ),
         # Translators: Name of event in the history
         (ACTION_SCREENSHOT_ADDED, gettext_lazy("Screenshot added")),
         # Translators: Name of event in the history
@@ -540,6 +589,8 @@ class Change(models.Model, UserDisplayMixin):
         (ACTION_SOURCE_UPLOAD, gettext_lazy("Translation updated by source upload")),
         # Translators: Name of event in the history
         (ACTION_COMPLETED_COMPONENT, gettext_lazy("Component translation completed")),
+        # Translators: Name of event in the history
+        (ACTION_ENFORCED_CHECK, gettext_lazy("Applied enforced check")),
     )
     ACTIONS_DICT = dict(ACTION_CHOICES)
     ACTION_STRINGS = {
@@ -577,6 +628,7 @@ class Change(models.Model, UserDisplayMixin):
         ACTION_SOURCE_CHANGE,
         ACTION_EXPLANATION,
         ACTION_NEW_UNIT,
+        ACTION_ENFORCED_CHECK,
     }
 
     # Actions shown on the repository management page
@@ -718,6 +770,17 @@ class Change(models.Model, UserDisplayMixin):
             "translation": self.translation or self.component or self.project,
         }
 
+    def __init__(self, *args, **kwargs) -> None:
+        self.notify_state = {}
+        for attr in ("user", "author"):
+            user = kwargs.get(attr)
+            if user is not None and hasattr(user, "get_token_user"):
+                # ProjectToken / ProjectUser integration
+                kwargs[attr] = user.get_token_user()
+        super().__init__(*args, **kwargs)
+        if not self.pk:
+            self.fixup_refereces()
+
     def save(self, *args, **kwargs) -> None:
         self.fixup_refereces()
 
@@ -766,17 +829,6 @@ class Change(models.Model, UserDisplayMixin):
         if self.project is not None:
             return self.project
         return None
-
-    def __init__(self, *args, **kwargs) -> None:
-        self.notify_state = {}
-        for attr in ("user", "author"):
-            user = kwargs.get(attr)
-            if user is not None and hasattr(user, "get_token_user"):
-                # ProjectToken / ProjectUser integration
-                kwargs[attr] = user.get_token_user()
-        super().__init__(*args, **kwargs)
-        if not self.pk:
-            self.fixup_refereces()
 
     @staticmethod
     def get_last_change_cache_key(translation_id: int) -> str:
@@ -994,8 +1046,6 @@ class Change(models.Model, UserDisplayMixin):
 @receiver(post_save, sender=Change)
 @disable_for_loaddata
 def change_notify(sender, instance, created=False, **kwargs) -> None:
-    from weblate.accounts.notifications import is_notificable_action
-    from weblate.accounts.tasks import notify_change
+    from weblate.accounts.notifications import dispatch_changes_notifications
 
-    if is_notificable_action(instance.action):
-        notify_change.delay_on_commit(instance.pk)
+    dispatch_changes_notifications([instance])
